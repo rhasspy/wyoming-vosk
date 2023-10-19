@@ -3,10 +3,11 @@ import argparse
 import asyncio
 import json
 import logging
+import sys
 import time
 from functools import partial
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from vosk import KaldiRecognizer, Model, SetLogLevel
 from wyoming.asr import Transcribe, Transcript
@@ -16,6 +17,7 @@ from wyoming.info import AsrModel, AsrProgram, Attribution, Describe, Info
 from wyoming.server import AsyncEventHandler, AsyncServer
 
 from .download import MODELS, download_model
+from .sentences import correct_sentence, load_sentences_for_language
 
 _LOGGER = logging.getLogger()
 _DIR = Path(__file__).parent
@@ -27,7 +29,6 @@ class State:
     def __init__(self, args: argparse.Namespace):
         self.args = args
         self.models: Dict[str, Model] = {}
-        self.limited_sentences: Dict[str, Dict[str, str]] = {}
 
     def get_model(self, language: str, model_name: str) -> Optional[Model]:
         model = self.models.get(model_name)
@@ -48,71 +49,6 @@ class State:
         self.models[model_name] = model
         return model
 
-    def get_sentences(self, language: str) -> Dict[str, str]:
-        if language in self.limited_sentences:
-            return self.limited_sentences[language]
-
-        try:
-            import hassil.parse_expression
-            import hassil.sample
-            import yaml
-        except ImportError as exc:
-            raise Exception("pip3 install wyoming-vosk[limited]") from exc
-
-        _LOGGER.debug(
-            "Loading limited sentences for %s from %s",
-            language,
-            self.args.limited,
-        )
-
-        sentences: Dict[str, str] = {}
-
-        # <language>:
-        #   - same text in and out
-        #   - in: text in
-        #     out: different text out
-        #   - in:
-        #       - multiple text
-        #       - multiple text in
-        #     out: different text out
-        with open(self.args.limited, "r", encoding="utf-8") as limited_file:
-            limited_langs = yaml.safe_load(limited_file)
-            limited_templates = limited_langs.get(language)
-            assert limited_templates, f"No sentences for {language}"
-
-            for template in limited_templates:
-                if isinstance(template, str):
-                    input_templates: List[str] = [template]
-                    output_text: Optional[str] = None
-                else:
-                    input_str_or_list = template["in"]
-                    if isinstance(input_str_or_list, str):
-                        # One template
-                        input_templates = [input_str_or_list]
-                    else:
-                        # Multiple templates
-                        input_templates = input_str_or_list
-
-                    output_text = template.get("out")
-
-                for input_template in input_templates:
-                    if hassil.intents.is_template(input_template):
-                        # Generate possible texts
-                        input_expression = hassil.parse_expression.parse_sentence(
-                            input_template
-                        )
-                        for input_text in hassil.sample.sample_expression(
-                            input_expression
-                        ):
-                            sentences[input_text] = output_text or input_text
-                    else:
-                        # Not a template
-                        sentences[input_template] = output_text or input_text
-
-        self.limited_sentences[language] = sentences
-
-        return sentences
-
 
 async def main() -> None:
     """Main entry point."""
@@ -131,11 +67,26 @@ async def main() -> None:
     parser.add_argument("--language", default="en")
     #
     parser.add_argument(
-        "--limited", help="Path to YAML file with sentences for each language"
+        "--sentences-dir", help="Directory with YAML files for each language"
     )
+    parser.add_argument(
+        "--correct-sentences",
+        nargs="?",
+        type=float,
+        const=0,
+        help="Enable sentence correction with optional score cutoff (0=strict, 100=relaxed)",
+    )
+    parser.add_argument("--limit-sentences", action="store_true")
     #
     parser.add_argument("--debug", action="store_true", help="Log DEBUG messages")
     args = parser.parse_args()
+
+    if (args.correct_sentences is not None) or args.limit_sentences:
+        if not args.sentences_dir:
+            _LOGGER.fatal(
+                "--sentences-dir is required with --correct-sentences or --limit-sentences"
+            )
+            sys.exit(1)
 
     if not args.download_dir:
         # Download to first data dir by default
@@ -253,7 +204,7 @@ class VoskEventHandler(AsyncEventHandler):
             text = result["text"]
             _LOGGER.debug("Transcript for client %s: %s", self.client_id, text)
 
-            if self.cli_args.limited:
+            if self.cli_args.correct_sentences is not None:
                 original_text = text
                 text = self._fix_transcript(original_text)
                 if text != original_text:
@@ -271,13 +222,14 @@ class VoskEventHandler(AsyncEventHandler):
         _LOGGER.debug("Client disconnected: %s", self.client_id)
 
     def _load_recognizer(self, model: Model) -> KaldiRecognizer:
-        if not self.cli_args.limited:
+        if not self.cli_args.limit_sentences:
             # Open-ended
             return KaldiRecognizer(model, 16000)
 
         assert self.language, "Language not set"
-        sentences = self.state.get_sentences(self.language)
-        assert sentences, f"No sentences for {self.language}"
+        sentences = load_sentences_for_language(
+            self.cli_args.sentences_dir, self.language
+        )
 
         _LOGGER.debug("Limiting to %s possible sentence(s)", len(sentences))
 
@@ -287,18 +239,13 @@ class VoskEventHandler(AsyncEventHandler):
     def _fix_transcript(self, text: str) -> str:
 
         assert self.language, "Language not set"
-        sentences = self.state.get_sentences(self.language)
-        assert sentences, f"No sentences for {self.language}"
+        sentences = load_sentences_for_language(
+            self.cli_args.sentences_dir, self.language
+        )
 
-        try:
-            from rapidfuzz.process import extractOne
-        except ImportError as exc:
-            raise Exception("pip3 install wyoming-vosk[limited]") from exc
-
-        fixed_text = extractOne(text, sentences.keys())[0]
-
-        # Map to output text
-        return sentences[fixed_text]
+        return correct_sentence(
+            text, sentences, score_cutoff=self.cli_args.correct_sentences
+        )
 
 
 # -----------------------------------------------------------------------------

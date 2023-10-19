@@ -12,7 +12,11 @@ URL_FORMAT = "https://huggingface.co/rhasspy/vosk-models/resolve/main/{language}
 _LOGGER = logging.getLogger(__name__)
 
 
-MODELS: Dict[str, List[str]] = {"en": ["vosk-model-small-en-us-0.15"]}
+MODELS: Dict[str, List[str]] = {
+    "ca": ["vosk-model-small-ca-0.4"],
+    "de": ["vosk-model-small-de-0.15"],
+    "en": ["vosk-model-small-en-us-0.15"],
+}
 
 
 def download_model(language: str, model_name: str, dest_dir: Union[str, Path]) -> Path:

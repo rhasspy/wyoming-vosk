@@ -1,7 +1,0 @@
-en:
-  - turn (on|off) the light
-  - set light to (red|green|blue)
-  - in:
-      - do something
-      - do something else
-    out: foo bar baz
