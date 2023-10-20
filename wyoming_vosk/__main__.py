@@ -33,7 +33,11 @@ class State:
     def get_model(
         self, language: str, model_name: Optional[str] = None
     ) -> Optional[Model]:
+        # Allow override
+        model_name = self.args.model_for_language.get(language, model_name)
+
         if not model_name:
+            # Use model matching --model-index
             available_models = MODELS[language]
             model_name = available_models[
                 min(self.args.model_index, len(available_models) - 1)
@@ -82,6 +86,14 @@ async def main() -> None:
         help="Preload model for language(s)",
     )
     parser.add_argument(
+        "--model-for-language",
+        nargs=2,
+        metavar=("language", "model"),
+        action="append",
+        default=[],
+        help="Override default model for language",
+    )
+    parser.add_argument(
         "--model-index",
         default=0,
         type=int,
@@ -113,6 +125,9 @@ async def main() -> None:
     if not args.download_dir:
         # Download to first data dir by default
         args.download_dir = args.data_dir[0]
+
+    # Convert to dict of language -> model
+    args.model_for_language = dict(args.model_for_language)
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
     _LOGGER.debug(args)
