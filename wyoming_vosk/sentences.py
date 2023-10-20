@@ -42,12 +42,15 @@ def load_sentences_for_language(
     #   <name>:
     #     - value 1
     #     - value 2
+    # expansion_rules:
+    #   <name>: sentence template
     with open(sentences_path, "r", encoding="utf-8") as sentences_file:
         sentences_yaml = yaml.safe_load(sentences_file)
         templates = sentences_yaml.get("sentences")
         if not templates:
             raise ValueError(f"No sentences for {language}")
 
+        # Load slot lists
         slot_lists: Dict[str, SlotList] = {}
         for slot_name, slot_values in sentences_yaml.get("lists", {}).items():
             slot_list_values: List[TextSlotValue] = []
@@ -67,6 +70,12 @@ def load_sentences_for_language(
 
             slot_lists[slot_name] = TextSlotList(slot_list_values)
 
+        # Load expansion rules
+        expansion_rules: Dict[str, hassil.Sentence] = {}
+        for rule_name, rule_text in sentences_yaml.get("expansion_rules", {}).items():
+            expansion_rules[rule_name] = hassil.parse_sentence(rule_text)
+
+        # Generate possible sentences
         for template in templates:
             if isinstance(template, str):
                 input_templates: List[str] = [template]
@@ -89,7 +98,9 @@ def load_sentences_for_language(
                         input_template
                     )
                     for input_text in hassil.sample.sample_expression(
-                        input_expression, slot_lists=slot_lists
+                        input_expression,
+                        slot_lists=slot_lists,
+                        expansion_rules=expansion_rules,
                     ):
                         sentences[input_text] = output_text or input_text
                 else:

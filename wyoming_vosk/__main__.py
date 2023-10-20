@@ -132,7 +132,8 @@ async def main() -> None:
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
     _LOGGER.debug(args)
 
-    SetLogLevel(0)
+    if args.debug:
+        SetLogLevel(0)
 
     wyoming_info = Info(
         asr=[

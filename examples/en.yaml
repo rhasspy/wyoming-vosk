@@ -2,7 +2,7 @@ sentences:
   - turn (on|off) the {light}
   - set light to {colors}
   - in:
-      - do something[ else]
+      - <do> something[ else]
     out: something completely different
 lists:
   colors:
@@ -13,3 +13,5 @@ lists:
     - light
     - in: lamp
       out: light
+expansion_rules:
+  do: do|try
