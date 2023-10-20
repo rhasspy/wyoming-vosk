@@ -65,6 +65,12 @@ async def main() -> None:
         help="Directory to download models into (default: first data dir)",
     )
     parser.add_argument("--language", default="en")
+    parser.add_argument(
+        "--model-index",
+        default=0,
+        type=int,
+        help="Index of model to use when name is not specified",
+    )
     #
     parser.add_argument(
         "--sentences-dir", help="Directory with YAML files for each language"
@@ -110,7 +116,7 @@ async def main() -> None:
                 models=[
                     AsrModel(
                         name=model_name,
-                        description=model_name,
+                        description=model_name.replace("vosk-model-", ""),
                         attribution=Attribution(
                             name="Alpha Cephei",
                             url="https://alphacephei.com/vosk/models",
@@ -182,8 +188,12 @@ class VoskEventHandler(AsyncEventHandler):
             if self.recognizer is None:
                 self.language = self.language or self.cli_args.language
                 if not self.model_name:
-                    self.model_name = MODELS[self.language][0]
+                    available_models = MODELS[self.language]
+                    self.model_name = available_models[
+                        min(self.cli_args.model_index, len(available_models) - 1)
+                    ]
 
+                assert self.model_name is not None
                 _LOGGER.debug(
                     "Loading %s for language %s", self.model_name, self.language
                 )
@@ -222,19 +232,21 @@ class VoskEventHandler(AsyncEventHandler):
         _LOGGER.debug("Client disconnected: %s", self.client_id)
 
     def _load_recognizer(self, model: Model) -> KaldiRecognizer:
-        if not self.cli_args.limit_sentences:
-            # Open-ended
-            return KaldiRecognizer(model, 16000)
 
-        assert self.language, "Language not set"
-        sentences = load_sentences_for_language(
-            self.cli_args.sentences_dir, self.language
-        )
+        if self.cli_args.limit_sentences:
+            assert self.language, "Language not set"
+            sentences = load_sentences_for_language(
+                self.cli_args.sentences_dir, self.language
+            )
+            if sentences:
+                _LOGGER.debug("Limiting to %s possible sentence(s)", len(sentences))
+                limited_sentences_str = json.dumps(
+                    list(sentences.keys()), ensure_ascii=False
+                )
+                return KaldiRecognizer(model, 16000, limited_sentences_str)
 
-        _LOGGER.debug("Limiting to %s possible sentence(s)", len(sentences))
-
-        limited_sentences_str = json.dumps(list(sentences.keys()))
-        return KaldiRecognizer(model, 16000, limited_sentences_str)
+        # Open-ended
+        return KaldiRecognizer(model, 16000)
 
     def _fix_transcript(self, text: str) -> str:
 
@@ -242,6 +254,10 @@ class VoskEventHandler(AsyncEventHandler):
         sentences = load_sentences_for_language(
             self.cli_args.sentences_dir, self.language
         )
+
+        if not sentences:
+            # Can't fix
+            return text
 
         return correct_sentence(
             text, sentences, score_cutoff=self.cli_args.correct_sentences

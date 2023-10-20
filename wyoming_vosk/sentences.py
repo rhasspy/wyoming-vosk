@@ -10,11 +10,17 @@ _LOGGER = logging.getLogger()
 
 def load_sentences_for_language(
     sentences_dir: Union[str, Path], language: str
-) -> Dict[str, str]:
+) -> Optional[Dict[str, str]]:
     """Load YAML file for language with sentence templates."""
     if language in _SENTENCES_CACHE:
         # Cache hit
         return _SENTENCES_CACHE[language]
+
+    sentences: Dict[str, str] = {}
+    sentences_path = Path(sentences_dir) / f"{language}.yaml"
+
+    if not sentences_path.exists():
+        return None
 
     try:
         import hassil.parse_expression
@@ -23,9 +29,6 @@ def load_sentences_for_language(
         from hassil.intents import SlotList, TextChunk, TextSlotList, TextSlotValue
     except ImportError as exc:
         raise Exception("pip3 install wyoming-vosk[limited]") from exc
-
-    sentences: Dict[str, str] = {}
-    sentences_path = Path(sentences_dir) / f"{language}.yaml"
 
     # sentences:
     #   - same text in and out
@@ -82,7 +85,7 @@ def load_sentences_for_language(
                         sentences[input_text] = output_text or input_text
                 else:
                     # Not a template
-                    sentences[input_template] = output_text or input_text
+                    sentences[input_template] = output_text or input_template
 
     _SENTENCES_CACHE[language] = sentences
 
