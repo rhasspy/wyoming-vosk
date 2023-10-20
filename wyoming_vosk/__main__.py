@@ -30,7 +30,17 @@ class State:
         self.args = args
         self.models: Dict[str, Model] = {}
 
-    def get_model(self, language: str, model_name: str) -> Optional[Model]:
+    def get_model(
+        self, language: str, model_name: Optional[str] = None
+    ) -> Optional[Model]:
+        if not model_name:
+            available_models = MODELS[language]
+            model_name = available_models[
+                min(self.args.model_index, len(available_models) - 1)
+            ]
+
+        assert model_name is not None
+
         model = self.models.get(model_name)
         if model is not None:
             return model
@@ -64,7 +74,13 @@ async def main() -> None:
         "--download-dir",
         help="Directory to download models into (default: first data dir)",
     )
-    parser.add_argument("--language", default="en")
+    parser.add_argument("--language", default="en", help="Set default model language")
+    parser.add_argument(
+        "--preload-language",
+        action="append",
+        default=[],
+        help="Preload model for language(s)",
+    )
     parser.add_argument(
         "--model-index",
         default=0,
@@ -132,6 +148,9 @@ async def main() -> None:
     )
 
     state = State(args)
+    for language in args.preload_language:
+        _LOGGER.debug("Preloading model for %s", language)
+        state.get_model(language)
 
     _LOGGER.info("Ready")
 
@@ -187,16 +206,6 @@ class VoskEventHandler(AsyncEventHandler):
         elif AudioChunk.is_type(event.type):
             if self.recognizer is None:
                 self.language = self.language or self.cli_args.language
-                if not self.model_name:
-                    available_models = MODELS[self.language]
-                    self.model_name = available_models[
-                        min(self.cli_args.model_index, len(available_models) - 1)
-                    ]
-
-                assert self.model_name is not None
-                _LOGGER.debug(
-                    "Loading %s for language %s", self.model_name, self.language
-                )
                 model = self.state.get_model(self.language, self.model_name)
                 assert model is not None, f"No model named: {self.model_name}"
 
