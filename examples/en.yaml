@@ -1,12 +1,15 @@
 sentences:
-  - turn (on|off) the light
+  - turn (on|off) the {light}
   - set light to {colors}
   - in:
-      - do something
-      - do something else
+      - do something[ else]
     out: something completely different
 lists:
   colors:
     - red
     - green
     - blue
+  light:
+    - light
+    - in: lamp
+      out: light

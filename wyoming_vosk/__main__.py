@@ -198,13 +198,16 @@ class VoskEventHandler(AsyncEventHandler):
             return True
 
         if Transcribe.is_type(event.type):
+            # Request to transcribe: set language/model
             transcribe = Transcribe.from_event(event)
             self.language = transcribe.language
             self.model_name = transcribe.name
         elif AudioStart.is_type(event.type):
+            # Recognized, but we don't do anything until we get an audio chunk
             pass
         elif AudioChunk.is_type(event.type):
             if self.recognizer is None:
+                # Load recognizer on first audio chunk
                 self.language = self.language or self.cli_args.language
                 model = self.state.get_model(self.language, self.model_name)
                 assert model is not None, f"No model named: {self.model_name}"
@@ -213,11 +216,13 @@ class VoskEventHandler(AsyncEventHandler):
 
             assert self.recognizer is not None
 
+            # Process audio chunk
             chunk = AudioChunk.from_event(event)
             chunk = self.converter.convert(chunk)
             self.recognizer.AcceptWaveform(chunk.audio)
 
         elif AudioStop.is_type(event.type):
+            # Get transcript
             assert self.recognizer is not None
             result = json.loads(self.recognizer.FinalResult())
             text = result["text"]
@@ -241,7 +246,7 @@ class VoskEventHandler(AsyncEventHandler):
         _LOGGER.debug("Client disconnected: %s", self.client_id)
 
     def _load_recognizer(self, model: Model) -> KaldiRecognizer:
-
+        """Loads Kaldi recognizer for the model, optionally limited by user-provided sentences."""
         if self.cli_args.limit_sentences:
             assert self.language, "Language not set"
             sentences = load_sentences_for_language(
@@ -258,7 +263,7 @@ class VoskEventHandler(AsyncEventHandler):
         return KaldiRecognizer(model, 16000)
 
     def _fix_transcript(self, text: str) -> str:
-
+        """Corrects a transcript using user-provided sentences."""
         assert self.language, "Language not set"
         sentences = load_sentences_for_language(
             self.cli_args.sentences_dir, self.language

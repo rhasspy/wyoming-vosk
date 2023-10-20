@@ -48,15 +48,24 @@ def load_sentences_for_language(
         if not templates:
             raise ValueError(f"No sentences for {language}")
 
-        slot_lists: Dict[str, SlotList] = {
-            slot_name: TextSlotList(
-                [
-                    TextSlotValue(TextChunk(value), value_out=value)
-                    for value in slot_values
-                ]
-            )
-            for slot_name, slot_values in sentences_yaml.get("lists", {}).items()
-        }
+        slot_lists: Dict[str, SlotList] = {}
+        for slot_name, slot_values in sentences_yaml.get("lists", {}).items():
+            slot_list_values: List[TextSlotValue] = []
+            for slot_value in slot_values:
+                if isinstance(slot_value, str):
+                    value_in: str = slot_value
+                    value_out: str = slot_value
+                else:
+                    # - in: text to say
+                    #   out: text to output
+                    value_in = slot_value["in"]
+                    value_out = slot_value["out"]
+
+                slot_list_values.append(
+                    TextSlotValue(TextChunk(value_in), value_out=value_out)
+                )
+
+            slot_lists[slot_name] = TextSlotList(slot_list_values)
 
         for template in templates:
             if isinstance(template, str):
