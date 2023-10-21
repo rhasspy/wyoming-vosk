@@ -52,7 +52,12 @@ def load_sentences_for_language(
 
         # Load slot lists
         slot_lists: Dict[str, SlotList] = {}
-        for slot_name, slot_values in sentences_yaml.get("lists", {}).items():
+        for slot_name, slot_info in sentences_yaml.get("lists", {}).items():
+            slot_values = slot_info.get("values")
+            if not slot_values:
+                _LOGGER.warning("No values for list %s, skipping", slot_name)
+                continue
+
             slot_list_values: List[TextSlotValue] = []
             for slot_value in slot_values:
                 if isinstance(slot_value, str):

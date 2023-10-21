@@ -74,8 +74,9 @@ sentences:
   - this is a sentence with a {list} and a <rule>
 lists:
   list:
-    - value 1
-    - value 2
+    values:
+      - value 1
+      - value 2
 expansion_rules:
   rule: body of the rule
 ```
@@ -107,12 +108,13 @@ sentences:
   - set light to {color}
 lists:
   color:
-    - red
-    - green
-    - blue
-    - orange
-    - yellow
-    - purple
+    values:
+      - red
+      - green
+      - blue
+      - orange
+      - yellow
+      - purple
 ```
 
 lets you set a light to one of six colors.
@@ -128,10 +130,11 @@ sentences:
   - turn (on|off) {device}
 lists:
   device:
-    - in: tv
-      out: living room tv
-    - in: light
-      out: bedroom room light
+    values:
+      - in: tv
+        out: living room tv
+      - in: light
+        out: bedroom room light
 ```
 
 lets you say "turn on tv" to turn on the living room TV, and "turn off light" to turn off the bedroom light.

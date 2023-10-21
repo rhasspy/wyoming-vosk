@@ -6,12 +6,14 @@ sentences:
     out: something completely different
 lists:
   colors:
-    - red
-    - green
-    - blue
+    values:
+      - red
+      - green
+      - blue
   light:
-    - light
-    - in: lamp
-      out: light
+    values:
+      - light
+      - in: lamp
+        out: light
 expansion_rules:
   do: do|try
