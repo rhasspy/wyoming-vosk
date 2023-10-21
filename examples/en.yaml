@@ -17,3 +17,5 @@ lists:
         out: light
 expansion_rules:
   do: do|try
+no_correct_patterns:
+  - "^draw .+$"

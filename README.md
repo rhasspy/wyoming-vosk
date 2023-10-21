@@ -1,6 +1,6 @@
 # Wyoming Vosk
 
-[Wyoming protocol](https://github.com/rhasspy/wyoming) server for the [vosk](https://alphacephei.com/vosk) speech to text system.
+[Wyoming protocol](https://github.com/rhasspy/wyoming) server for the [vosk](https://alphacephei.com/vosk) speech to text system, with optional sentence correction using [rapidfuzz](https://github.com/maxbachmann/RapidFuzz).
 
 This speech-to-text system can run well, even on a Raspberry Pi 3. Using the corrected or limited modes (described below), you can achieve very high accuracy by restricting the sentences that can be spoken.
 
@@ -28,6 +28,8 @@ Note that `wyoming_vosk` will only automatically download models listed in `down
 
 ### Corrected
 
+By specifying which sentences will be spoken ahead of time, transcripts from vosk can be corrected using [rapidfuzz](https://github.com/maxbachmann/RapidFuzz).
+
 Create your [sentence templates](#sentence-templates) and save them to a file named `<SENTENCES_DIR>/<LANGUAGE>.yaml` where `<LANGUAGE>` is one of the [supported language codes](#supported-languages). For example, English sentences should be saved in `<SENTENCES_DIR>/en.yaml`.
 
 Then, run `wyoming_vosk` like:
@@ -42,6 +44,8 @@ where `<CUTOFF>` is:
 * 1-100 - allow more sentences that are not similar to templates to pass through
 
 When `<CUTOFF>` is 100, speech recognition is effectively open-ended again. Experiment with different values to find one that lets you speak sentences outside your templates without sacrificing accuracy too much.
+
+If you have a set of sentences with a specific pattern that you'd like to skip correction, add them to your [no-correct patterns](#no-correct-patterns).
 
 
 ### Limited
@@ -154,6 +158,23 @@ expansion_rules:
 ```
 
 lets you say "turn on light" or "turn off my light" without having to repeat the optional part.
+
+## No Correct Patterns
+
+When you [correct sentences](#correct-sentences), you want to keep the score cutoff as low as possible to avoid letting invalid sentences though. But what if you just want *some* open-ended sentences, such as "draw me a picture of ..." which you can then forward to an image generator?
+
+Add the following to your sentences YAML file:
+
+``` yaml
+sentences:
+  ...
+no_correct_patterns:
+  - <regular expression>
+  - <regular expression>
+  ...
+```
+
+You can add as many regular expressions to `no_correct_patterns` as you'd like. If the transcript matches any of these patterns, it will be sent with no further corrections. This effectively lets you "punch holes" in the sentence templates to allow some sentences through.
 
 ## Supported Languages
 

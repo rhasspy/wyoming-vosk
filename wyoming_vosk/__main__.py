@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import argparse
 import asyncio
 import json
@@ -21,6 +21,12 @@ from .sentences import correct_sentence, load_sentences_for_language
 
 _LOGGER = logging.getLogger()
 _DIR = Path(__file__).parent
+_CASING = {
+    "casefold": lambda s: s.casefold(),
+    "lower": lambda s: s.lower(),
+    "upper": lambda s: s.upper(),
+    "keep": lambda s: s,
+}
 
 
 class State:
@@ -94,6 +100,14 @@ async def main() -> None:
         help="Override default model for language",
     )
     parser.add_argument(
+        "--casing-for-language",
+        nargs=2,
+        metavar=("language", "casing"),
+        action="append",
+        default=[],
+        help="Override casing for language (casefold, lower, upper, keep)",
+    )
+    parser.add_argument(
         "--model-index",
         default=0,
         type=int,
@@ -128,6 +142,12 @@ async def main() -> None:
 
     # Convert to dict of language -> model
     args.model_for_language = dict(args.model_for_language)
+
+    # Convert to dict of language -> casing
+    args.casing_for_language = {
+        language: _CASING.get(casing, _CASING["keep"])
+        for language, casing in args.casing_for_language
+    }
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
     _LOGGER.debug(args)
@@ -241,7 +261,10 @@ class VoskEventHandler(AsyncEventHandler):
             # Get transcript
             assert self.recognizer is not None
             result = json.loads(self.recognizer.FinalResult())
-            text = result["text"]
+            casing_func = self.cli_args.casing_for_language.get(
+                self.language, _CASING["keep"]
+            )
+            text = casing_func(result["text"])
             _LOGGER.debug("Transcript for client %s: %s", self.client_id, text)
 
             if self.cli_args.correct_sentences is not None:
@@ -265,13 +288,15 @@ class VoskEventHandler(AsyncEventHandler):
         """Loads Kaldi recognizer for the model, optionally limited by user-provided sentences."""
         if self.cli_args.limit_sentences:
             assert self.language, "Language not set"
-            sentences = load_sentences_for_language(
+            lang_config = load_sentences_for_language(
                 self.cli_args.sentences_dir, self.language
             )
-            if sentences:
-                _LOGGER.debug("Limiting to %s possible sentence(s)", len(sentences))
+            if (lang_config is not None) and lang_config.sentences:
+                _LOGGER.debug(
+                    "Limiting to %s possible sentence(s)", len(lang_config.sentences)
+                )
                 limited_sentences_str = json.dumps(
-                    list(sentences.keys()), ensure_ascii=False
+                    list(lang_config.sentences.keys()), ensure_ascii=False
                 )
                 return KaldiRecognizer(model, 16000, limited_sentences_str)
 
@@ -281,16 +306,16 @@ class VoskEventHandler(AsyncEventHandler):
     def _fix_transcript(self, text: str) -> str:
         """Corrects a transcript using user-provided sentences."""
         assert self.language, "Language not set"
-        sentences = load_sentences_for_language(
+        lang_config = load_sentences_for_language(
             self.cli_args.sentences_dir, self.language
         )
 
-        if not sentences:
+        if lang_config is None:
             # Can't fix
             return text
 
         return correct_sentence(
-            text, sentences, score_cutoff=self.cli_args.correct_sentences
+            text, lang_config, score_cutoff=self.cli_args.correct_sentences
         )
 
 
