@@ -24,7 +24,7 @@ setup(
     license="MIT",
     packages=setuptools.find_packages(),
     install_requires=requirements,
-    extras_require={"limited": ["PyYAML>=6,<7", "rapidfuzz==3.3.1"]},
+    extras_require={"limited": ["PyYAML>=6,<7", "rapidfuzz==3.3.1", "hassil==1.2.5"]},
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
