@@ -9,6 +9,8 @@ _LOGGER = logging.getLogger()
 
 @dataclass
 class LanguageConfig:
+    sentences_mtime_ns: int
+    sentences_file_size: int
     sentences: Dict[str, str] = field(default_factory=dict)
     no_correct_patterns: List[re.Pattern] = field(default_factory=list)
 
@@ -21,15 +23,28 @@ def load_sentences_for_language(
     sentences_dir: Union[str, Path], language: str
 ) -> Optional[LanguageConfig]:
     """Load YAML file for language with sentence templates."""
-    if language in _CONFIG_CACHE:
-        # Cache hit
-        return _CONFIG_CACHE[language]
-
     sentences_path = Path(sentences_dir) / f"{language}.yaml"
-    if not sentences_path.exists():
+    if not sentences_path.is_file():
         return None
 
-    config = LanguageConfig()
+    sentences_stats = sentences_path.stat()
+    config = _CONFIG_CACHE.get(language)
+
+    # We will reload if the file modification time or size has changed
+    if (
+        (config is not None)
+        and (sentences_stats.st_mtime_ns == config.sentences_mtime_ns)
+        and (sentences_stats.st_size == config.sentences_file_size)
+    ):
+        # Cache hit
+        return config
+
+    # Load YAML
+    _LOGGER.debug("Loading %s", sentences_path)
+    config = LanguageConfig(
+        sentences_mtime_ns=sentences_stats.st_mtime_ns,
+        sentences_file_size=sentences_stats.st_size,
+    )
 
     try:
         import hassil.parse_expression
@@ -146,19 +161,23 @@ def correct_sentence(
             return text
 
     try:
+        from rapidfuzz.distance import Levenshtein
         from rapidfuzz.process import extractOne
     except ImportError as exc:
         raise Exception("pip3 install wyoming-vosk[limited]") from exc
 
-    result = extractOne(text, config.sentences.keys(), score_cutoff=score_cutoff)
-    if result is None:
-        _LOGGER.debug("Transcript was above score cutoff: %s", text)
-        return text
+    result = extractOne(
+        text,
+        config.sentences.keys(),
+        scorer=Levenshtein.distance,
+        scorer_kwargs={"weights": (1, 1, 3)},
+    )
+    fixed_text, score = result[0], result[1]
+    _LOGGER.debug(
+        "score=%s/%s, original=%s, fixed=%s", score, score_cutoff, text, fixed_text
+    )
 
-    fixed_text, score = result[0], result[2]
-    _LOGGER.debug("score=%s, original=%s, fixed=%s", score, text, fixed_text)
-
-    if score >= score_cutoff:
+    if score <= score_cutoff:
         # Map to output text
         return config.sentences[fixed_text]
 

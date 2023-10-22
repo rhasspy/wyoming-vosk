@@ -41,9 +41,9 @@ script/run ... --sentences-dir <SENTENCES_DIR> --correct-sentences <CUTOFF>
 where `<CUTOFF>` is:
 
 * empty or 0 - force transcript to be one of the template sentences
-* 1-100 - allow more sentences that are not similar to templates to pass through
+* greater than 0 - allow more sentences that are not similar to templates to pass through
 
-When `<CUTOFF>` is 100, speech recognition is effectively open-ended again. Experiment with different values to find one that lets you speak sentences outside your templates without sacrificing accuracy too much.
+When `<CUTOFF>` is large, speech recognition is effectively open-ended again. Experiment with different values to find one that lets you speak sentences outside your templates without sacrificing accuracy too much.
 
 If you have a set of sentences with a specific pattern that you'd like to skip correction, add them to your [no-correct patterns](#no-correct-patterns).
 
@@ -91,13 +91,14 @@ For example:
 
 ``` yaml
 sentences:
-  - in: lumos
+  - in: lou mo ss  # lumos
     out: turn on all the lights
-  - in: nox
+  - in: knocks   # nox
     out: turn off all the lights
 ```
 
 lets you say "lumos" to send "turn on all the lights", and "nox" to send "turn off all the lights".
+Notice that we used words that sound like "lumos" and "nox" because [the vocabulary](https://huggingface.co/rhasspy/vosk-models/tree/main/_vocab) of the default English model is limited (`vosk-model-small-en-us-0.15`).
 
 The `in` key can also take a list of sentences, all of them outputting the same `out` string.
 

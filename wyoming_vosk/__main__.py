@@ -123,7 +123,7 @@ async def main() -> None:
         nargs="?",
         type=float,
         const=0,
-        help="Enable sentence correction with optional score cutoff (0=strict, 100=relaxed)",
+        help="Enable sentence correction with optional score cutoff (0=strict, higher=less strict)",
     )
     parser.add_argument(
         "--limit-sentences",
