@@ -27,6 +27,7 @@ _CASING = {
     "upper": lambda s: s.upper(),
     "keep": lambda s: s,
 }
+_UNK = "[unk]"
 
 
 class State:
@@ -124,7 +125,16 @@ async def main() -> None:
         const=0,
         help="Enable sentence correction with optional score cutoff (0=strict, 100=relaxed)",
     )
-    parser.add_argument("--limit-sentences", action="store_true")
+    parser.add_argument(
+        "--limit-sentences",
+        action="store_true",
+        help="Only sentences in --sentences-dir can be spoken",
+    )
+    parser.add_argument(
+        "--allow-unknown",
+        action="store_true",
+        help="Return empty transcript when unknown words are spoken",
+    )
     #
     parser.add_argument("--debug", action="store_true", help="Log DEBUG messages")
     args = parser.parse_args()
@@ -295,8 +305,13 @@ class VoskEventHandler(AsyncEventHandler):
                 _LOGGER.debug(
                     "Limiting to %s possible sentence(s)", len(lang_config.sentences)
                 )
+                limited_sentences = list(lang_config.sentences.keys())
+                if self.cli_args.allow_unknown:
+                    # Enable unknown words (will return empty transcript)
+                    limited_sentences.append(_UNK)
+
                 limited_sentences_str = json.dumps(
-                    list(lang_config.sentences.keys()), ensure_ascii=False
+                    limited_sentences, ensure_ascii=False
                 )
                 return KaldiRecognizer(model, 16000, limited_sentences_str)
 
@@ -305,6 +320,9 @@ class VoskEventHandler(AsyncEventHandler):
 
     def _fix_transcript(self, text: str) -> str:
         """Corrects a transcript using user-provided sentences."""
+        if self.cli_args.allow_unknown and (text == _UNK):
+            return ""
+
         assert self.language, "Language not set"
         lang_config = load_sentences_for_language(
             self.cli_args.sentences_dir, self.language

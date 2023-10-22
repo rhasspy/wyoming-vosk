@@ -176,6 +176,10 @@ no_correct_patterns:
 
 You can add as many regular expressions to `no_correct_patterns` as you'd like. If the transcript matches any of these patterns, it will be sent with no further corrections. This effectively lets you "punch holes" in the sentence templates to allow some sentences through.
 
+## Allow Unknown
+
+With `--allow-unknown`, you can enable the detection of "unknown" words/phrases outside of the model's vocabulary. Transcripts that are "unknown" will be set to empty strings, indicating that nothing was recognized. When combined with [limited sentences](#limited-sentences), this lets you differentiate between in and out of domain sentences.
+
 ## Supported Languages
 
 * Arabic (`ar`)
