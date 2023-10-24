@@ -13,6 +13,7 @@ class LanguageConfig:
     sentences_file_size: int
     sentences: Dict[str, str] = field(default_factory=dict)
     no_correct_patterns: List[re.Pattern] = field(default_factory=list)
+    unknown_text: Optional[str] = None
 
 
 # language -> config
@@ -142,6 +143,9 @@ def load_sentences_for_language(
         no_correct_patterns = sentences_yaml.get("no_correct_patterns", [])
         for pattern_text in no_correct_patterns:
             config.no_correct_patterns.append(re.compile(pattern_text))
+
+        # Load text to use for unknown sentences
+        config.unknown_text = sentences_yaml.get("unknown_text")
 
     _CONFIG_CACHE[language] = config
 

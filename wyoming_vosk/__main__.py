@@ -337,13 +337,16 @@ class VoskEventHandler(AsyncEventHandler):
 
     def _fix_transcript(self, text: str) -> str:
         """Corrects a transcript using user-provided sentences."""
-        if self.cli_args.allow_unknown and self._has_unknown(text):
-            return ""
-
         assert self.language, "Language not set"
         lang_config = load_sentences_for_language(
             self.cli_args.sentences_dir, self.language
         )
+
+        if self.cli_args.allow_unknown and self._has_unknown(text):
+            if lang_config is not None:
+                return lang_config.unknown_text or ""
+
+            return ""
 
         if lang_config is None:
             # Can't fix
