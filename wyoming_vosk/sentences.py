@@ -177,7 +177,7 @@ def correct_sentence(
         "score=%s/%s, original=%s, fixed=%s", score, score_cutoff, text, fixed_text
     )
 
-    if score <= score_cutoff:
+    if (score_cutoff <= 0) or (score <= score_cutoff):
         # Map to output text
         return config.sentences[fixed_text]
 

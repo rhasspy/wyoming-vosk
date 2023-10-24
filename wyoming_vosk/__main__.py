@@ -7,7 +7,7 @@ import sys
 import time
 from functools import partial
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from vosk import KaldiRecognizer, Model, SetLogLevel
 from wyoming.asr import Transcribe, Transcript
@@ -16,7 +16,7 @@ from wyoming.event import Event
 from wyoming.info import AsrModel, AsrProgram, Attribution, Describe, Info
 from wyoming.server import AsyncEventHandler, AsyncServer
 
-from .download import MODELS, download_model
+from .download import CASING_FOR_MODEL, MODELS, UNK_FOR_MODEL, download_model
 from .sentences import correct_sentence, load_sentences_for_language
 
 _LOGGER = logging.getLogger()
@@ -27,7 +27,8 @@ _CASING = {
     "upper": lambda s: s.upper(),
     "keep": lambda s: s,
 }
-_UNK = "[unk]"
+_DEFAULT_CASING = "casefold"
+_DEFAULT_UNK = "[unk]"
 
 
 class State:
@@ -35,11 +36,11 @@ class State:
 
     def __init__(self, args: argparse.Namespace):
         self.args = args
-        self.models: Dict[str, Model] = {}
+        self.models: Dict[str, Tuple[str, Model]] = {}
 
     def get_model(
         self, language: str, model_name: Optional[str] = None
-    ) -> Optional[Model]:
+    ) -> Optional[Tuple[str, Model]]:
         # Allow override
         model_name = self.args.model_for_language.get(language, model_name)
 
@@ -52,9 +53,9 @@ class State:
 
         assert model_name is not None
 
-        model = self.models.get(model_name)
-        if model is not None:
-            return model
+        name_and_model = self.models.get(model_name)
+        if name_and_model is not None:
+            return name_and_model
 
         # Check if model is already downloaded
         for data_dir in self.args.data_dir:
@@ -62,13 +63,18 @@ class State:
             if model_dir.is_dir():
                 _LOGGER.debug("Found %s at %s", model_name, model_dir)
                 model = Model(str(model_dir))
-                self.models[model_name] = model
-                return model
+                name_and_model = (model_name, model)
+                self.models[model_name] = name_and_model
+
+                return name_and_model
 
         model_dir = download_model(language, model_name, self.args.download_dir)
         model = Model(str(model_dir))
-        self.models[model_name] = model
-        return model
+
+        name_and_model = (model_name, model)
+        self.models[model_name] = name_and_model
+
+        return name_and_model
 
 
 async def main() -> None:
@@ -154,15 +160,13 @@ async def main() -> None:
     args.model_for_language = dict(args.model_for_language)
 
     # Convert to dict of language -> casing
-    args.casing_for_language = {
-        language: _CASING.get(casing, _CASING["keep"])
-        for language, casing in args.casing_for_language
-    }
+    args.casing_for_language = dict(args.casing_for_language)
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
     _LOGGER.debug(args)
 
     if args.debug:
+        # Enable vosk debug logging
         SetLogLevel(0)
 
     wyoming_info = Info(
@@ -255,8 +259,11 @@ class VoskEventHandler(AsyncEventHandler):
             if self.recognizer is None:
                 # Load recognizer on first audio chunk
                 self.language = self.language or self.cli_args.language
-                model = self.state.get_model(self.language, self.model_name)
-                assert model is not None, f"No model named: {self.model_name}"
+                name_and_model = self.state.get_model(self.language, self.model_name)
+                assert (
+                    name_and_model is not None
+                ), f"No model named: {self.model_name} for language: {self.language}"
+                self.model_name, model = name_and_model
 
                 self.recognizer = self._load_recognizer(model)
 
@@ -271,10 +278,7 @@ class VoskEventHandler(AsyncEventHandler):
             # Get transcript
             assert self.recognizer is not None
             result = json.loads(self.recognizer.FinalResult())
-            casing_func = self.cli_args.casing_for_language.get(
-                self.language, _CASING["keep"]
-            )
-            text = casing_func(result["text"])
+            text = result["text"]
             _LOGGER.debug("Transcript for client %s: %s", self.client_id, text)
 
             if self.cli_args.correct_sentences is not None:
@@ -302,16 +306,29 @@ class VoskEventHandler(AsyncEventHandler):
                 self.cli_args.sentences_dir, self.language
             )
             if (lang_config is not None) and lang_config.sentences:
+                _LOGGER.info(self.model_name)
+                casing_func_name = CASING_FOR_MODEL.get(
+                    self.model_name,
+                    self.cli_args.casing_for_language.get(
+                        self.language, _DEFAULT_CASING
+                    ),
+                )
                 _LOGGER.debug(
-                    "Limiting to %s possible sentence(s)", len(lang_config.sentences)
+                    "Limiting to %s possible sentence(s) with casing=%s",
+                    len(lang_config.sentences),
+                    casing_func_name,
                 )
                 limited_sentences = list(lang_config.sentences.keys())
+
                 if self.cli_args.allow_unknown:
                     # Enable unknown words (will return empty transcript)
-                    limited_sentences.append(_UNK)
+                    limited_sentences.append(
+                        UNK_FOR_MODEL.get(self.model_name, _DEFAULT_UNK)
+                    )
 
+                casing_func = _CASING[casing_func_name]
                 limited_sentences_str = json.dumps(
-                    limited_sentences, ensure_ascii=False
+                    [casing_func(s) for s in limited_sentences], ensure_ascii=False
                 )
                 return KaldiRecognizer(model, 16000, limited_sentences_str)
 
@@ -320,7 +337,7 @@ class VoskEventHandler(AsyncEventHandler):
 
     def _fix_transcript(self, text: str) -> str:
         """Corrects a transcript using user-provided sentences."""
-        if self.cli_args.allow_unknown and (text == _UNK):
+        if self.cli_args.allow_unknown and self._has_unknown(text):
             return ""
 
         assert self.language, "Language not set"
@@ -335,6 +352,11 @@ class VoskEventHandler(AsyncEventHandler):
         return correct_sentence(
             text, lang_config, score_cutoff=self.cli_args.correct_sentences
         )
+
+    def _has_unknown(self, text: str) -> bool:
+        """Return true if text contains unknown token."""
+        unk_token = UNK_FOR_MODEL.get(self.model_name, _DEFAULT_UNK)
+        return (text == unk_token) or (unk_token in text.split())
 
 
 # -----------------------------------------------------------------------------

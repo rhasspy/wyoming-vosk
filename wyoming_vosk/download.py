@@ -3,7 +3,7 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 from urllib.request import urlopen
 from zipfile import ZipFile
 
@@ -13,7 +13,6 @@ _LOGGER = logging.getLogger(__name__)
 
 
 MODELS: Dict[str, List[str]] = {
-    "ar": ["vosk-model-ar-mgb2-0.4"],
     "br": ["vosk-model-br-0.8"],
     "ca": ["vosk-model-small-ca-0.4"],
     "cs": ["vosk-model-small-cs-0.4-rhasspy"],
@@ -35,10 +34,24 @@ MODELS: Dict[str, List[str]] = {
     "sv": ["vosk-model-small-sv-rhasspy-0.15"],
     "tl": ["vosk-model-tl-ph-generic-0.6"],
     "tr": ["vosk-model-small-tr-0.3"],
-    "uk": ["vosk-model-small-uk-v3-small"],
     "uz": ["vosk-model-small-uz-0.22"],
     "vi": ["vosk-model-small-vn-0.4", "vosk-model-vn-0.4"],
     "zh": ["vosk-model-small-cn-0.22"],
+    # Not working:
+    # "ar": ["vosk-model-ar-mgb2-0.4"],
+    # "uk": ["vosk-model-small-uk-v3-small"],
+}
+
+CASING_FOR_MODEL: Dict[Optional[str], str] = {
+    "vosk-model-small-ko-0.22": "upper",
+    "vosk-model-small-ru-0.22": "keep",
+    "vosk-model-small-uk-v3-small": "keep",
+    "vosk-model-small-cn-0.22": "keep",
+}
+
+UNK_FOR_MODEL: Dict[Optional[str], str] = {
+    "vosk-model-small-ko-0.22": "<UNK>",
+    "vosk-model-small-sv-rhasspy-0.15": "<unk>",
 }
 
 

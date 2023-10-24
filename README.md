@@ -179,32 +179,46 @@ You can add as many regular expressions to `no_correct_patterns` as you'd like. 
 
 ## Allow Unknown
 
-With `--allow-unknown`, you can enable the detection of "unknown" words/phrases outside of the model's vocabulary. Transcripts that are "unknown" will be set to empty strings, indicating that nothing was recognized. When combined with [limited sentences](#limited-sentences), this lets you differentiate between in and out of domain sentences.
+With `--allow-unknown`, you can enable the detection of "unknown" words/phrases outside of the model's vocabulary. Transcripts that are "unknown" will be set to empty strings, indicating that nothing was recognized. When combined with [limited sentences](#limited), this lets you differentiate between in and out of domain sentences.
+
+**NOTE**: Some models do not support unknown words/phrases. See [supported languages](#supported-languages).
 
 ## Supported Languages
 
-* Arabic (`ar`)
-* Breton (`br`)
 * Catalan (`ca`)
 * Czech (`cz`)
+    * Does not work with [allow unknown](#allow-unknown)
 * German (`de`)
+    * Does not work with [allow unknown](#allow-unknown)
 * English (`en`)
-* Esperanto (`eo`)
 * Spanish (`es`)
+    * Does not work with [allow unknown](#allow-unknown)
 * Persian (`fa`)
+    * Does not work with [allow unknown](#allow-unknown)
 * French (`fr`)
 * Hindi (`hi`)
+    * Does not work with [allow unknown](#allow-unknown)
 * Italian (`it`)
-* Japanese (`ja`)
+    * Does not work with [allow unknown](#allow-unknown)
 * Korean (`ko`)
-* Kazakh (`kz`)
+    * Does not work with [allow unknown](#allow-unknown)
 * Dutch (`nl`)
 * Polish (`pl`)
+    * Does not work with [allow unknown](#allow-unknown)
 * Portuguese (`pt`)
+    * Does not work with [allow unknown](#allow-unknown)
 * Russian (`ru`)
+    * Does not work with [allow unknown](#allow-unknown)
 * Swedish (`sv`)
-* Tagalog (`tl`)
-* Ukrainian (`uk`)
-* Uzbek (`uz`)
+    * Does not work with [limited sentences](#limited) and [allow unknown](#allow-unknown)
 * Vietnamese (`vn`)
 * Chinese (`zh`)
+
+Not tested (no intent support yet in Home Assistant):
+
+* Breton (`br`)
+* Esperanto (`eo`)
+* Japanese (`ja`)
+* Kazakh (`kz`)
+* Tagalog (`tl`)
+* Uzbek (`uz`)

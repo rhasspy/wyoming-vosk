@@ -16,7 +16,7 @@ if requirements_path.is_file():
 
 setup(
     name="wyoming_vosk",
-    version="1.0.0",
+    version="1.1.0",
     description="Wyoming Server for Vosk",
     url="http://github.com/rhasspy/wyoming-vosk",
     author="Michael Hansen",
