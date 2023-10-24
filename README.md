@@ -4,6 +4,8 @@
 
 This speech-to-text system can run well, even on a Raspberry Pi 3. Using the corrected or limited modes (described below), you can achieve very high accuracy by restricting the sentences that can be spoken.
 
+Models are automatically downloaded from [HuggingFace](https://huggingface.co/rhasspy/vosk-models), but they are originally from [Alpha Cephei](https://alphacephei.com/vosk/models). Please review the license of each model that you use ([model list](https://github.com/rhasspy/wyoming-vosk/blob/master/wyoming_vosk/download.py)).
+
 ## Modes
 
 There are three operating modes:
