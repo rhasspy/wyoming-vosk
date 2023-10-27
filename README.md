@@ -84,8 +84,10 @@ lists:
       - value 1
       - value 2
 expansion_rules:
-  rule: body of the rule
+  rule: "body of the rule"
 ```
+
+Make sure to put quotes around anything in YAML that starts with `[` or `{` characters, since YAML will interpret those as the start of a list or dictionary. Additionally, words like on/off/yes/no have to be quoted to stop them from being turned into booleans.
 
 Sentences have a special `in/out` form as well, which lets you say one thing (`in`) but put something else in the transcript (`out`).
 
