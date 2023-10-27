@@ -13,10 +13,10 @@ lists:
   light:
     values:
       - light
-      - in: lamp
+      - in: "lamp|chandelier"
         out: light
 expansion_rules:
-  do: do|try
+  do: "do|try"
 no_correct_patterns:
   - "^draw .+$"
 unknown_text: "Text sent for unknown commands"
