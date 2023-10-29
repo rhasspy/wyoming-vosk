@@ -3,11 +3,12 @@ import argparse
 import asyncio
 import json
 import logging
+import sqlite3
 import sys
 import time
 from functools import partial
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from vosk import KaldiRecognizer, Model, SetLogLevel
 from wyoming.asr import Transcribe, Transcript
@@ -125,6 +126,10 @@ async def main() -> None:
         "--sentences-dir", help="Directory with YAML files for each language"
     )
     parser.add_argument(
+        "--database-dir",
+        help="Directory to store databases with sentences (default: sentences-dir)",
+    )
+    parser.add_argument(
         "--correct-sentences",
         nargs="?",
         type=float,
@@ -155,6 +160,9 @@ async def main() -> None:
     if not args.download_dir:
         # Download to first data dir by default
         args.download_dir = args.data_dir[0]
+
+    if not args.database_dir:
+        args.database_dir = args.sentences_dir
 
     # Convert to dict of language -> model
     args.model_for_language = dict(args.model_for_language)
@@ -201,6 +209,7 @@ async def main() -> None:
     for language in args.preload_language:
         _LOGGER.debug("Preloading model for %s", language)
         state.get_model(language)
+        load_sentences_for_language(args.sentences_dir, language, args.database_dir)
 
     _LOGGER.info("Ready")
 
@@ -265,7 +274,12 @@ class VoskEventHandler(AsyncEventHandler):
                 ), f"No model named: {self.model_name} for language: {self.language}"
                 self.model_name, model = name_and_model
 
+                start_time = time.monotonic()
                 self.recognizer = self._load_recognizer(model)
+                end_time = time.monotonic()
+                _LOGGER.debug(
+                    "Loaded recognizer in %0.2f second(s)", end_time - start_time
+                )
 
             assert self.recognizer is not None
 
@@ -303,10 +317,17 @@ class VoskEventHandler(AsyncEventHandler):
         if self.cli_args.limit_sentences:
             assert self.language, "Language not set"
             lang_config = load_sentences_for_language(
-                self.cli_args.sentences_dir, self.language
+                self.cli_args.sentences_dir,
+                self.language,
+                self.cli_args.database_dir,
             )
-            if (lang_config is not None) and lang_config.sentences:
-                _LOGGER.info(self.model_name)
+            if (lang_config is not None) and lang_config.database_path.is_file():
+                words: List[str] = []
+                with sqlite3.connect(str(lang_config.database_path)) as db_conn:
+                    cursor = db_conn.execute("SELECT word from WORDS")
+                    for row in cursor:
+                        words.append(row[0])
+
                 casing_func_name = CASING_FOR_MODEL.get(
                     self.model_name,
                     self.cli_args.casing_for_language.get(
@@ -314,23 +335,20 @@ class VoskEventHandler(AsyncEventHandler):
                     ),
                 )
                 _LOGGER.debug(
-                    "Limiting to %s possible sentence(s) with casing=%s",
-                    len(lang_config.sentences),
+                    "Limiting to %s possible word(s) with casing=%s",
+                    len(words),
                     casing_func_name,
                 )
-                limited_sentences = list(lang_config.sentences.keys())
 
                 if self.cli_args.allow_unknown:
                     # Enable unknown words (will return empty transcript)
-                    limited_sentences.append(
-                        UNK_FOR_MODEL.get(self.model_name, _DEFAULT_UNK)
-                    )
+                    words.append(UNK_FOR_MODEL.get(self.model_name, _DEFAULT_UNK))
 
                 casing_func = _CASING[casing_func_name]
-                limited_sentences_str = json.dumps(
-                    [casing_func(s) for s in limited_sentences], ensure_ascii=False
+                limited_str = json.dumps(
+                    [casing_func(w) for w in words], ensure_ascii=False
                 )
-                return KaldiRecognizer(model, 16000, limited_sentences_str)
+                return KaldiRecognizer(model, 16000, limited_str)
 
         # Open-ended
         return KaldiRecognizer(model, 16000)
@@ -339,7 +357,9 @@ class VoskEventHandler(AsyncEventHandler):
         """Corrects a transcript using user-provided sentences."""
         assert self.language, "Language not set"
         lang_config = load_sentences_for_language(
-            self.cli_args.sentences_dir, self.language
+            self.cli_args.sentences_dir,
+            self.language,
+            self.cli_args.database_dir,
         )
 
         if self.cli_args.allow_unknown and self._has_unknown(text):

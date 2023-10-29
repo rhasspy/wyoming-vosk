@@ -1,22 +1,94 @@
 sentences:
-  - turn (on|off) the {light}
-  - set light to {colors}
-  - in:
-      - <do> something[ else]
-    out: something completely different
+  - turn (on|off) [the] ({device}|{light})
+  - turn (on|off) [the] ({area} lights | lights in {area})
+  - turn [the] ({device}|{light}) (on|off)
+  - (set|change) [the] ({light}|{area} lights) [to] {color}
+  - (set|change) [the] ({light}|{area} lights) (brightness [to ]<brightness>|[to ]<brightness> [brightness])
+  - in: red alert
+    out: set living room light red
+  - in: all clear
+    out: set living room light white
+expansion_rules:
+  brightness: ({brightness_names}|{brightness_numbers}[ percent])
 lists:
-  colors:
+  color:
     values:
       - red
       - green
       - blue
+      - orange
+      - purple
+      - yellow
+      - white
+  area:
+    values:
+      - kitchen
+      - bedroom
+      - living room
+      - guest room
+      - bathroom
+      - entrance
+      - downstairs
+      - office
+  device:
+    values:
+      - living room tv
+      - bedroom tv
+      - speaker system
+      - downstairs tv
   light:
     values:
-      - light
-      - in: "lamp|chandelier"
-        out: light
-expansion_rules:
-  do: "do|try"
-no_correct_patterns:
-  - "^draw .+$"
-unknown_text: "Text sent for unknown commands"
+      - bedroom lamp
+      - living room lamp
+      - in: living room [top|overhead] (light|chandelier)
+        out: living room light
+      - office light
+      - desk light
+  brightness_numbers:
+    values:
+      - in: five
+        out: 5
+      - in: ten
+        out: 10
+      - in: fifteen
+        out: 15
+      - in: twenty
+        out: 20
+      - in: twenty five
+        out: 25
+      - in: thirty
+        out: 30
+      - in: thirty five
+        out: 35
+      - in: forty
+        out: 40
+      - in: forty five
+        out: 45
+      - in: fifty
+        out: 50
+      - in: fifty five
+        out: 55
+      - in: sixty
+        out: 60
+      - in: sixty five
+        out: 65
+      - in: seventy
+        out: 70
+      - in: seventy five
+        out: 75
+      - in: eighty
+        out: 80
+      - in: eighty five
+        out: 85
+      - in: ninety
+        out: 90
+      - in: ninety five
+        out: 95
+      - in: "[a |one ]hundred"
+        out: 100
+  brightness_names:
+    values:
+      - in: (min[imum]|dim)
+        out: 10
+      - in: (max[imum]|full)
+        out: 100
