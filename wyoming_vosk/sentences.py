@@ -202,14 +202,14 @@ def generate_sentences(sentences_yaml: Dict[str, Any], db_conn: sqlite3.Connecti
                 input_expression = hassil.parse_expression.parse_sentence(
                     input_template
                 )
-                for input_text, output_text in sample_expression_with_output(
+                for input_text, maybe_output_text in sample_expression_with_output(
                     input_expression,
                     slot_lists=slot_lists,
                     expansion_rules=expansion_rules,
                 ):
                     db_conn.execute(
                         "INSERT INTO sentences (input_text, output_text) VALUES (?, ?)",
-                        (input_text, output_text or input_text),
+                        (input_text, output_text or maybe_output_text or input_text),
                     )
                     words.update(w.strip() for w in input_text.split())
                     num_sentences += 1
