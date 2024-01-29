@@ -17,6 +17,7 @@ from wyoming.event import Event
 from wyoming.info import AsrModel, AsrProgram, Attribution, Describe, Info
 from wyoming.server import AsyncEventHandler, AsyncServer
 
+from . import __version__
 from .download import CASING_FOR_MODEL, MODELS, UNK_FOR_MODEL, download_model
 from .sentences import correct_sentence, load_sentences_for_language
 
@@ -148,6 +149,15 @@ async def main() -> None:
     )
     #
     parser.add_argument("--debug", action="store_true", help="Log DEBUG messages")
+    parser.add_argument(
+        "--log-format", default=logging.BASIC_FORMAT, help="Format for log messages"
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=__version__,
+        help="Print version and exit",
+    )
     args = parser.parse_args()
 
     if (args.correct_sentences is not None) or args.limit_sentences:
@@ -170,7 +180,9 @@ async def main() -> None:
     # Convert to dict of language -> casing
     args.casing_for_language = dict(args.casing_for_language)
 
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO, format=args.log_format
+    )
     _LOGGER.debug(args)
 
     if args.debug:
@@ -187,6 +199,7 @@ async def main() -> None:
                     url="https://alphacephei.com/vosk/",
                 ),
                 installed=True,
+                version=__version__,
                 models=[
                     AsrModel(
                         name=model_name,
@@ -196,6 +209,7 @@ async def main() -> None:
                             url="https://alphacephei.com/vosk/models",
                         ),
                         installed=True,
+                        version=None,
                         languages=[language],
                     )
                     for language, model_names in MODELS.items()

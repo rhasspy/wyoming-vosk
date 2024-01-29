@@ -1,2 +1,2 @@
 vosk==0.3.45
-wyoming==1.2.0
+wyoming==1.5.2

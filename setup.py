@@ -12,17 +12,26 @@ if requirements_path.is_file():
     with open(requirements_path, "r", encoding="utf-8") as requirements_file:
         requirements = requirements_file.read().splitlines()
 
+module_name = "wyoming_vosk"
+module_dir = this_dir / module_name
+data_files = []
+
+version_path = module_dir / "VERSION"
+data_files.append(version_path)
+version = version_path.read_text(encoding="utf-8").strip()
+
 # -----------------------------------------------------------------------------
 
 setup(
-    name="wyoming_vosk",
-    version="1.3.0",
+    name=module_name,
+    version=version,
     description="Wyoming Server for Vosk",
     url="http://github.com/rhasspy/wyoming-vosk",
     author="Michael Hansen",
     author_email="mike@rhasspy.org",
     license="MIT",
     packages=setuptools.find_packages(),
+    package_data={module_name: [str(p.relative_to(module_dir)) for p in data_files]},
     install_requires=requirements,
     extras_require={"limited": ["PyYAML>=6,<7", "rapidfuzz==3.3.1", "hassil==1.2.5"]},
     classifiers=[
