@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0
+
+- Restore Arabic and Ukrainian models
+
 ## 1.4.0
 
 - Add tests and Github actions

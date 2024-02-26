@@ -1,13 +1,12 @@
 """Tests for wyoming-vosk"""
 import asyncio
-import re
 import sys
 import wave
 from asyncio.subprocess import PIPE
 from pathlib import Path
 
 import pytest
-from wyoming.asr import Transcribe, Transcript
+from wyoming.asr import Transcript
 from wyoming.audio import AudioStart, AudioStop, wav_to_chunks
 from wyoming.event import async_read_event, async_write_event
 from wyoming.info import Describe, Info
@@ -16,14 +15,20 @@ _DIR = Path(__file__).parent
 _PROGRAM_DIR = _DIR.parent
 _LOCAL_DIR = _PROGRAM_DIR / "local"
 _SAMPLES_PER_CHUNK = 1024
-_MODEL = "vosk-model-small-en-us-0.15"
 
 # Need to give time for the model to download
 _TRANSCRIBE_TIMEOUT = 60
 
+_TEST_PHRASE = {
+    "ar": "تتتلمذ اللغة العربية",
+    "en": "turn on the living room lamp",
+    "uk": "ви розмовляєте українською",
+}
 
+
+@pytest.mark.parametrize("language", ["en", "uk", "ar"])
 @pytest.mark.asyncio
-async def test_vosk() -> None:
+async def test_vosk(language: str) -> None:
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
@@ -33,7 +38,7 @@ async def test_vosk() -> None:
         "--data-dir",
         str(_LOCAL_DIR),
         "--language",
-        "en",
+        language,
         stdin=PIPE,
         stdout=PIPE,
     )
@@ -53,14 +58,13 @@ async def test_vosk() -> None:
         assert len(info.asr) == 1, "Expected one asr service"
         asr = info.asr[0]
         assert len(asr.models) > 0, "Expected at least one model"
-        assert any(m.name == _MODEL for m in asr.models), f"Expected {_MODEL} model"
+        assert any(
+            language in m.languages for m in asr.models
+        ), f"Expected a model for {language}"
         break
 
-    # We want to use the whisper model
-    await async_write_event(Transcribe(name=_MODEL).event(), proc.stdin)
-
     # Test known WAV
-    with wave.open(str(_DIR / "turn_on_the_living_room_lamp.wav"), "rb") as example_wav:
+    with wave.open(str(_DIR / f"{language}.wav"), "rb") as example_wav:
         await async_write_event(
             AudioStart(
                 rate=example_wav.getframerate(),
@@ -85,8 +89,7 @@ async def test_vosk() -> None:
 
         transcript = Transcript.from_event(event)
         text = transcript.text.lower().strip()
-        text = re.sub(r"[^a-z ]", "", text)
-        assert text == "turn on the living room lamp"
+        assert text == _TEST_PHRASE[language]
         break
 
     # Need to close stdin for graceful termination
