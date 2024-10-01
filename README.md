@@ -45,7 +45,7 @@ where `<CUTOFF>` is:
 * empty or 0 - force transcript to be one of the template sentences
 * greater than 0 - allow more sentences that are not similar to templates to pass through
 
-When `<CUTOFF>` is large, speech recognition is effectively open-ended again. Experiment with different values to find one that lets you speak sentences outside your templates without sacrificing accuracy too much.
+When `<CUTOFF>` is large, speech recognition is effectively open-ended again. Experiment with different values to find one that lets you speak sentences outside your templates without sacrificing accuracy too much. See description the `score_cutoff` parameter in [the rapidfuzz docs](https://rapidfuzz.github.io/RapidFuzz/Usage/distance/Levenshtein.html) for more details (`weights=(1, 1, 3)`).
 
 If you have a set of sentences with a specific pattern that you'd like to skip correction, add them to your [no-correct patterns](#no-correct-patterns).
 
