@@ -1,20 +1,28 @@
 import argparse
+import functools
 import itertools
 import logging
 import re
 import sqlite3
 import time
 from collections import abc
+from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+
+from deepmerge import always_merger
 
 if TYPE_CHECKING:
     from hassil.expression import Expression, Sentence
     from hassil.intents import SlotList
 
 _LOGGER = logging.getLogger()
+
+LISTS_KEY = "lists"
+EXP_RULES_KEY = "exp_rules"
+CURR_EXP_RULE_KEY = "_curr_exp_rule"
 
 
 @dataclass
@@ -202,14 +210,22 @@ def generate_sentences(sentences_yaml: Dict[str, Any], db_conn: sqlite3.Connecti
                 input_expression = hassil.parse_expression.parse_sentence(
                     input_template
                 )
-                for input_text, maybe_output_text in sample_expression_with_output(
+                for (
+                    input_text,
+                    maybe_output_text,
+                    used_substitutions,
+                ) in sample_expression_with_output(
                     input_expression,
                     slot_lists=slot_lists,
                     expansion_rules=expansion_rules,
                 ):
+                    substituted_output_text = __substitute(
+                        output_text or maybe_output_text or input_text,
+                        used_substitutions,
+                    )
                     db_conn.execute(
                         "INSERT INTO sentences (input_text, output_text) VALUES (?, ?)",
-                        (input_text, output_text or maybe_output_text or input_text),
+                        (input_text, substituted_output_text),
                     )
                     words.update(w.strip() for w in input_text.split())
                     num_sentences += 1
@@ -246,7 +262,8 @@ def sample_expression_with_output(
     expression: "Expression",
     slot_lists: "Optional[Dict[str, SlotList]]" = None,
     expansion_rules: "Optional[Dict[str, Sentence]]" = None,
-) -> Iterable[Tuple[str, Optional[str]]]:
+    used_substitutions={LISTS_KEY: {}, EXP_RULES_KEY: {}},
+) -> Iterable[Tuple[str, Optional[str], dict]]:
     """Sample possible text strings from an expression."""
     from hassil.expression import (
         ListReference,
@@ -259,17 +276,23 @@ def sample_expression_with_output(
     from hassil.recognize import MissingListError, MissingRuleError
     from hassil.util import normalize_whitespace
 
+    used_substitutions = deepcopy(used_substitutions)
     if isinstance(expression, TextChunk):
         chunk: TextChunk = expression
-        yield (chunk.original_text, chunk.original_text)
+        if CURR_EXP_RULE_KEY in used_substitutions:
+            curr_exp_rule_name = used_substitutions[CURR_EXP_RULE_KEY]
+            used_substitutions[EXP_RULES_KEY][curr_exp_rule_name] = chunk.original_text
+        yield (chunk.original_text, chunk.original_text, used_substitutions)
     elif isinstance(expression, Sequence):
         seq: Sequence = expression
+
         if seq.type == SequenceType.ALTERNATIVE:
             for item in seq.items:
                 yield from sample_expression_with_output(
                     item,
                     slot_lists,
                     expansion_rules,
+                    used_substitutions,
                 )
         elif seq.type == SequenceType.GROUP:
             seq_sentences = map(
@@ -277,6 +300,7 @@ def sample_expression_with_output(
                     sample_expression_with_output,
                     slot_lists=slot_lists,
                     expansion_rules=expansion_rules,
+                    used_substitutions=used_substitutions,
                 ),
                 seq.items,
             )
@@ -286,6 +310,9 @@ def sample_expression_with_output(
                     normalize_whitespace("".join(w[0] for w in sentence_words)),
                     normalize_whitespace(
                         "".join(w[1] for w in sentence_words if w[1] is not None)
+                    ),
+                    functools.reduce(
+                        always_merger.merge, [w[-1] for w in sentence_words]
                     ),
                 )
         else:
@@ -307,10 +334,15 @@ def sample_expression_with_output(
             for text_value in text_list.values:
                 if text_value.value_out:
                     is_first_text = True
-                    for input_text, output_text in sample_expression_with_output(
+                    for (
+                        input_text,
+                        output_text,
+                        used_substitutions,
+                    ) in sample_expression_with_output(
                         text_value.text_in,
                         slot_lists,
                         expansion_rules,
+                        used_substitutions,
                     ):
                         if is_first_text:
                             output_text = (
@@ -322,12 +354,19 @@ def sample_expression_with_output(
                         else:
                             output_text = None
 
-                        yield (input_text, output_text)
+                        used_substitutions[LISTS_KEY][
+                            list_ref.list_name
+                        ] = text_value.value_out
+                        yield (input_text, output_text, used_substitutions)
                 else:
+                    used_substitutions[LISTS_KEY][
+                        list_ref.list_name
+                    ] = text_value.value_out
                     yield from sample_expression_with_output(
                         text_value.text_in,
                         slot_lists,
                         expansion_rules,
+                        used_substitutions,
                     )
         else:
             raise ValueError(f"Unexpected slot list type: {slot_list}")
@@ -338,13 +377,23 @@ def sample_expression_with_output(
             raise MissingRuleError(f"Missing expansion rule <{rule_ref.rule_name}>")
 
         rule_body = expansion_rules[rule_ref.rule_name]
+        used_substitutions.update({CURR_EXP_RULE_KEY: rule_ref.rule_name})
         yield from sample_expression_with_output(
-            rule_body,
-            slot_lists,
-            expansion_rules,
+            rule_body, slot_lists, expansion_rules, used_substitutions
         )
     else:
         raise ValueError(f"Unexpected expression: {expression}")
+
+
+def __substitute(
+    out_sentence: str, used_substitutions: dict[str, dict[str, str]]
+) -> str:
+    """Substitutes templates with text used to generate input text"""
+    for list_name, list_item in used_substitutions[LISTS_KEY].items():
+        out_sentence = out_sentence.replace("{" + list_name + "}", list_item, 1)
+    for exp_name, exp_item in used_substitutions[EXP_RULES_KEY].items():
+        out_sentence = out_sentence.replace("<" + exp_name + ">", exp_item, 1)
+    return out_sentence
 
 
 def correct_sentence(

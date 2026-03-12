@@ -1,0 +1,41 @@
+sentences:
+  - testword1 testword2
+  # testword1 testword2
+
+  - in: testword1 {list} testword2
+    out: testword1 {list}
+  # testword1 listfirstitem
+  # testword1 listseconditem
+
+  - testword1 {list}
+  # testword1 listfirstitem
+  # testword1 listseconditem
+
+  - in: testword1 {list} <er2> testword2
+    out: testword1 {list} <er2>
+  # testword1 listfirstitem er2_1
+  # testword1 listfirstitem er2_2
+  # testword1 listfirstitem er2_3
+  # testword1 listseconditem er2_1
+  # testword1 listseconditem er2_2
+  # testword1 listseconditem er2_3
+  - in:
+      - testword1 {list} <er1>
+      - testword2 <er1> {list}
+    out: testword3 {list} <er1>
+  # testword3 listfirstitem er1_1
+  # testword3 listfirstitem er1_2
+  # testword3 listfirstitem er1_3
+  # testword3 listseconditem er1_1
+  # testword3 listseconditem er1_2
+  # testword3 listseconditem er1_3
+
+lists:
+  list:
+    values:
+      - listfirstitem
+      - in: listseconditem
+        out: listseconditem
+expansion_rules:
+  er1: "[er1_1|er1_2]"
+  er2: "(er2_1|er2_2|er2_3)"
