@@ -24,7 +24,7 @@ MODELS: Dict[str, List[str]] = {
     "fa": ["vosk-model-small-fa-0.5"],
     "fr": ["vosk-model-small-fr-0.22"],
     "hi": ["vosk-model-small-hi-0.22"],
-    "it": ["vosk-model-small-it-0.22"],
+    "it": ["vosk-model-small-it-0.22", "vosk-model-it-0.22"],
     "ja": ["vosk-model-small-ja-0.22"],
     "ko": ["vosk-model-small-ko-0.22"],
     "kz": ["vosk-model-small-kz-0.15"],
