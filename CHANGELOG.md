@@ -4,7 +4,10 @@
 
 - Limited mode restricts vosk to whole sentences instead of individual words
 - Match transcripts to templates phonetically (Metaphone) instead of by spelling
-- `--correct-sentences` cutoff is now normalized by transcript length and defaults to 0.2 (0 disables correction)
+- `--correct-sentences` cutoff is now normalized by transcript length and defaults to 0.2
+    - **Breaking**: `0` used to mean "always correct" and now means "never correct"
+    - A larger cutoff has always meant *more* correction; the README said the opposite ([#12](https://github.com/rhasspy/wyoming-vosk/issues/12))
+- `--limit-sentences` always maps the transcript to its closest template, ignoring the cutoff
 - Sentence templates support number ranges, `requires_context`/`excludes_context`, and `{list}`/`<rule>` back references in `out` (thanks @dekiesel)
 - Move packaging from `setup.py`/`requirements*.txt` to `pyproject.toml`
 - Bump wyoming to 1.10.2, hassil to 3.12.1, rapidfuzz to 3.14.6

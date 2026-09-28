@@ -387,7 +387,13 @@ class VoskEventHandler(AsyncEventHandler):
             return text
 
         return correct_sentence(
-            text, lang_config, score_cutoff=self.cli_args.correct_sentences
+            text,
+            lang_config,
+            score_cutoff=self.cli_args.correct_sentences,
+            # Limited mode promises that only template sentences are sent, and
+            # vosk cannot produce anything else, so never let a transcript
+            # through uncorrected because of the score cutoff.
+            always_correct=self.cli_args.limit_sentences,
         )
 
     def _has_unknown(self, text: str) -> bool:

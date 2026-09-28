@@ -50,6 +50,8 @@ A transcript is replaced by the closest template only when its score is **below*
 
 Experiment with different values to find one that lets you speak sentences outside your templates without sacrificing accuracy too much.
 
+**Changed in 1.6.0**: a larger `<CUTOFF>` has always meant *more* correction, but earlier versions of this README said the opposite. `0` also used to mean "always correct" and now means "never correct" — if you have `--correct-sentences 0` in your configuration, drop the `0` to keep correcting.
+
 If you have a set of sentences with a specific pattern that you'd like to skip correction, add them to your [no-correct patterns](#no-correct-patterns).
 
 
@@ -62,6 +64,8 @@ script/run ... --sentences-dir <SENTENCES_DIR> --correct-sentences --limit-sente
 ```
 
 This will tell vosk that **only** the sentences from you templates can ever be spoken. Sentence correction is still needed (due to how vosk works internally), but it will ensure that sentences outside the templates cannot be sent.
+
+In this mode the transcript is always mapped to its closest template, whatever `<CUTOFF>` is set to, since vosk cannot produce anything else. [No-correct patterns](#no-correct-patterns) still apply.
 
 This mode will get you the highest possible accuracy, with the trade-off being that you cannot speak sentences outside the templates.
 
