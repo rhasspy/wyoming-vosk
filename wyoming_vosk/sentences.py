@@ -539,9 +539,18 @@ def sample_expression_with_output(
 
 
 def correct_sentence(
-    text: str, config: LanguageConfig, score_cutoff: float = 0.2
+    text: str,
+    config: LanguageConfig,
+    score_cutoff: float = 0.2,
+    always_correct: bool = False,
 ) -> str:
-    """Correct a sentence using rapidfuzz."""
+    """Correct a sentence using rapidfuzz.
+
+    With always_correct, the closest template is used no matter how far away it
+    is. This is for limited mode, where vosk can only produce template
+    sentences anyway, so the closest one is always the intended one.
+    A "no correct" pattern still wins over always_correct.
+    """
     if not config.database_path.is_file():
         # Can't correct without a database
         return text
@@ -580,14 +589,15 @@ def correct_sentence(
         norm_score = score / len(text)
 
         final_text = text
-        if norm_score < score_cutoff:
+        if always_correct or (norm_score < score_cutoff):
             # Map to output text
             final_text = fixed_row[1]
 
         _LOGGER.debug(
-            "score=%s/%s, original=%s, final=%s",
+            "score=%s/%s, always_correct=%s, original=%s, final=%s",
             norm_score,
             score_cutoff,
+            always_correct,
             text,
             final_text,
         )

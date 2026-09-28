@@ -1,10 +1,30 @@
 """Tests for sentence template generation."""
 
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import pytest
 import yaml
 
-from wyoming_vosk.sentences import generate_sentences
+from wyoming_vosk.sentences import (
+    _CONFIG_CACHE,
+    LanguageConfig,
+    correct_sentence,
+    generate_sentences,
+    load_sentences_for_language,
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_config_cache():
+    """Keep the language cache from leaking between tests.
+
+    It is keyed on language alone, so two tests writing the same en.yaml could
+    otherwise share a config.
+    """
+    _CONFIG_CACHE.clear()
+    yield
+    _CONFIG_CACHE.clear()
 
 
 def generate(sentences_yaml: str) -> List[Tuple[str, str]]:
@@ -149,3 +169,72 @@ def test_no_back_references() -> None:
             ("nevermind", ""),
         ]
     )
+
+
+def build_config(tmp_path: Path, sentences_yaml: str) -> LanguageConfig:
+    """Write a sentences file and build its database."""
+    (tmp_path / "en.yaml").write_text(sentences_yaml, encoding="utf-8")
+    config = load_sentences_for_language(tmp_path, "en", tmp_path)
+    assert config is not None
+    return config
+
+
+_CORRECTION_SENTENCES = """
+sentences:
+  - turn on the kitchen light
+  - set the lamp to red
+no_correct_patterns:
+  - "^draw me .*"
+"""
+
+
+def test_cutoff_corrects_near_misses_only(tmp_path: Path) -> None:
+    """A higher cutoff corrects more, which is the opposite of the old docs."""
+    config = build_config(tmp_path, _CORRECTION_SENTENCES)
+
+    # Sounds close to a template
+    assert (
+        correct_sentence("turn on the kichen lite", config, score_cutoff=0.2)
+        == "turn on the kitchen light"
+    )
+
+    # Nothing like a template
+    assert (
+        correct_sentence("play some jazz music please", config, score_cutoff=0.2)
+        == "play some jazz music please"
+    )
+
+
+def test_cutoff_of_zero_never_corrects(tmp_path: Path) -> None:
+    """0 disables correction. In 1.5.0 it meant the opposite: always correct."""
+    config = build_config(tmp_path, _CORRECTION_SENTENCES)
+    assert (
+        correct_sentence("turn on the kichen lite", config, score_cutoff=0)
+        == "turn on the kichen lite"
+    )
+
+
+def test_always_correct_ignores_cutoff(tmp_path: Path) -> None:
+    """Limited mode forces a template even for a transcript that is far away."""
+    config = build_config(tmp_path, _CORRECTION_SENTENCES)
+    assert correct_sentence(
+        "play some jazz music please",
+        config,
+        score_cutoff=0,
+        always_correct=True,
+    ) in ("turn on the kitchen light", "set the lamp to red")
+
+
+def test_no_correct_pattern_beats_always_correct(tmp_path: Path) -> None:
+    """An explicit no-correct pattern still passes text through untouched."""
+    config = build_config(tmp_path, _CORRECTION_SENTENCES)
+    assert (
+        correct_sentence("draw me a picture of a cat", config, always_correct=True)
+        == "draw me a picture of a cat"
+    )
+
+
+def test_empty_transcript_is_not_forced(tmp_path: Path) -> None:
+    """An empty transcript stays empty, even in limited mode."""
+    config = build_config(tmp_path, _CORRECTION_SENTENCES)
+    assert correct_sentence("", config, always_correct=True) == ""
