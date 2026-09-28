@@ -1,4 +1,5 @@
 """Utility for downloading faster-whisper models."""
+
 import logging
 import shutil
 import tempfile

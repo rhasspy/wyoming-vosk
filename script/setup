@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
+"""Install wyoming-vosk and its dependencies into a virtual environment.
+
+Uses the currently active virtual environment (a pyenv-virtualenv, for example)
+if there is one, and otherwise creates .venv in the project directory.
+"""
 import argparse
 import subprocess
+import sys
 import venv
 from pathlib import Path
 
@@ -12,21 +18,23 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--dev", action="store_true", help="Install dev requirements")
 args = parser.parse_args()
 
-# Create virtual environment
-builder = venv.EnvBuilder(with_pip=True)
-context = builder.ensure_directories(_VENV_DIR)
-builder.create(_VENV_DIR)
+in_venv = sys.prefix != sys.base_prefix
 
-# Upgrade dependencies
-pip = [context.env_exe, "-m", "pip"]
+if _VENV_DIR.is_dir() or not in_venv:
+    # Create/reuse .venv in the project directory
+    builder = venv.EnvBuilder(with_pip=True)
+    context = builder.ensure_directories(_VENV_DIR)
+    builder.create(_VENV_DIR)
+    python_exe = context.env_exe
+else:
+    # Install into the already-active virtual environment
+    python_exe = sys.executable
+
+# Upgrade build tools
+pip = [python_exe, "-m", "pip"]
 subprocess.check_call(pip + ["install", "--upgrade", "pip"])
 subprocess.check_call(pip + ["install", "--upgrade", "setuptools", "wheel"])
 
-# Install requirements
-subprocess.check_call(pip + ["install", "-r", str(_PROGRAM_DIR / "requirements.txt")])
-
-if args.dev:
-    # Install dev requirements
-    subprocess.check_call(
-        pip + ["install", "-r", str(_PROGRAM_DIR / "requirements_dev.txt")]
-    )
+# Install wyoming-vosk itself (see pyproject.toml for dependencies)
+extras = "limited,dev" if args.dev else "limited"
+subprocess.check_call(pip + ["install", "-e", f"{_PROGRAM_DIR}[{extras}]"])

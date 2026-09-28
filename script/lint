@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import subprocess
+import sys
 import venv
 from pathlib import Path
 
@@ -9,11 +10,16 @@ _VENV_DIR = _PROGRAM_DIR / ".venv"
 _MODULE_DIR = _PROGRAM_DIR / "wyoming_vosk"
 _TESTS_DIR = _PROGRAM_DIR / "tests"
 
-_LINT_DIRS = [_MODULE_DIR, _TESTS_DIR]
+if _VENV_DIR.is_dir():
+    python_exe = venv.EnvBuilder().ensure_directories(_VENV_DIR).env_exe
+else:
+    # Fall back to the interpreter running this script (e.g. a pyenv-virtualenv)
+    python_exe = sys.executable
 
-context = venv.EnvBuilder().ensure_directories(_VENV_DIR)
-subprocess.check_call([context.env_exe, "-m", "black"] + _LINT_DIRS + ["--check"])
-subprocess.check_call([context.env_exe, "-m", "isort"] + _LINT_DIRS + ["--check"])
-subprocess.check_call([context.env_exe, "-m", "flake8"] + _LINT_DIRS)
-subprocess.check_call([context.env_exe, "-m", "pylint"] + _LINT_DIRS)
-subprocess.check_call([context.env_exe, "-m", "mypy"] + _LINT_DIRS)
+_LINT_DIRS = [str(_MODULE_DIR), str(_TESTS_DIR)]
+
+subprocess.check_call([python_exe, "-m", "black"] + _LINT_DIRS + ["--check"])
+subprocess.check_call([python_exe, "-m", "isort"] + _LINT_DIRS + ["--check"])
+subprocess.check_call([python_exe, "-m", "flake8"] + _LINT_DIRS)
+subprocess.check_call([python_exe, "-m", "pylint"] + _LINT_DIRS)
+subprocess.check_call([python_exe, "-m", "mypy"] + _LINT_DIRS)

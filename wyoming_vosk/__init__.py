@@ -1,4 +1,5 @@
 """Wyoming server for vosk."""
+
 from pathlib import Path
 
 _DIR = Path(__file__).parent

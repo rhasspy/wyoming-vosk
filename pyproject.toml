@@ -1,0 +1,116 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wyoming_vosk"
+dynamic = ["version"]
+description = "Wyoming Server for Vosk"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE.md"]
+requires-python = ">=3.9"
+authors = [{ name = "Michael Hansen", email = "mike@rhasspy.org" }]
+keywords = ["rhasspy", "wyoming", "vosk", "stt"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Text Processing :: Linguistic",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = ["vosk==0.3.45", "wyoming==1.10.2"]
+
+[project.optional-dependencies]
+# Needed for --limit-sentences and --correct-sentences
+limited = [
+    "PyYAML>=6,<7",
+    "hassil==3.12.1",
+    "rapidfuzz==3.14.6",
+    "unicode-rbnf==2.4.0",
+    "pyphonetics==0.5.3",
+]
+dev = [
+    "black==26.5.1",
+    "build==1.6.1",
+    "flake8==7.4.1",
+    "isort==9.0.1",
+    "mypy==2.3.1",
+    "pylint==4.0.9",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+]
+
+[project.urls]
+Homepage = "http://github.com/rhasspy/wyoming-vosk"
+"Source Code" = "http://github.com/rhasspy/wyoming-vosk"
+
+[tool.setuptools]
+packages = ["wyoming_vosk"]
+
+[tool.setuptools.dynamic]
+version = { file = "wyoming_vosk/VERSION" }
+
+[tool.setuptools.package-data]
+wyoming_vosk = ["VERSION"]
+
+[tool.black]
+target-version = ["py39"]
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+line_length = 88
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.pylint.messages_control]
+disable = [
+    "format",
+    "abstract-method",
+    "cyclic-import",
+    "duplicate-code",
+    "global-statement",
+    "import-outside-toplevel",
+    "inconsistent-return-statements",
+    "locally-disabled",
+    "not-context-manager",
+    "too-few-public-methods",
+    "too-many-arguments",
+    "too-many-branches",
+    "too-many-instance-attributes",
+    "too-many-lines",
+    "too-many-locals",
+    "too-many-positional-arguments",
+    "too-many-public-methods",
+    "too-many-return-statements",
+    "too-many-statements",
+    "too-many-boolean-expressions",
+    "unnecessary-pass",
+    "unused-argument",
+    "broad-except",
+    "too-many-nested-blocks",
+    "invalid-name",
+    "unused-import",
+    "fixme",
+    "useless-super-delegation",
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "import-error",
+    "consider-using-with",
+]
+
+[tool.pylint.format]
+expected-line-ending-format = "LF"
