@@ -5,7 +5,7 @@
 - Limited mode restricts vosk to whole sentences instead of individual words
 - Match transcripts to templates phonetically (Metaphone) instead of by spelling
 - `--correct-sentences` cutoff is now normalized by transcript length and defaults to 0.2 (0 disables correction)
-- Sentence templates support number ranges, `requires_context`/`excludes_context`, and `{list}` references in `out`
+- Sentence templates support number ranges, `requires_context`/`excludes_context`, and `{list}`/`<rule>` back references in `out` (thanks @dekiesel)
 - Move packaging from `setup.py`/`requirements*.txt` to `pyproject.toml`
 - Bump wyoming to 1.10.2, hassil to 3.12.1, rapidfuzz to 3.14.6
 - Fix crash on audio that needs resampling

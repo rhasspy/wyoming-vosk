@@ -34,6 +34,37 @@ class LanguageConfig:
     unknown_text: Optional[str] = None
 
 
+@dataclass
+class Substitutions:
+    """Text that was actually sampled for each {list} and <rule> reference.
+
+    Used to resolve back references in a sentence's output text, so that
+    "turn on <device>" can produce "turn on the kitchen light".
+    """
+
+    lists: Dict[str, Any] = field(default_factory=dict)
+    rules: Dict[str, str] = field(default_factory=dict)
+
+    def merged(self, *others: "Substitutions") -> "Substitutions":
+        """Return a copy with the values from others applied on top."""
+        merged = Substitutions(dict(self.lists), dict(self.rules))
+        for other in others:
+            merged.lists.update(other.lists)
+            merged.rules.update(other.rules)
+
+        return merged
+
+    def apply(self, text: str) -> str:
+        """Replace {list} and <rule> back references in output text."""
+        if self.lists:
+            text = text.format(**self.lists)
+
+        for rule_name, rule_text in self.rules.items():
+            text = text.replace(f"<{rule_name}>", rule_text)
+
+        return text
+
+
 # language -> config
 _CONFIG_CACHE: Dict[str, LanguageConfig] = {}
 
@@ -318,7 +349,7 @@ def generate_sentences(
             for (
                 input_text,
                 maybe_output_text,
-                list_values,
+                substitutions,
             ) in sample_expression_with_output(
                 input_expression,
                 slot_lists=slot_lists,
@@ -327,14 +358,12 @@ def generate_sentences(
                 excludes_context=excludes_context,
             ):
                 if output_text is None:
+                    # Sampled text already has lists and rules expanded
                     final_output_text = maybe_output_text or input_text
                 else:
-                    # May be empty
-                    final_output_text = output_text
-
-                if list_values:
-                    # Replace {lists} with values
-                    final_output_text = final_output_text.format(**list_values)
+                    # May be empty.
+                    # Resolve {list} and <rule> back references.
+                    final_output_text = substitutions.apply(output_text)
 
                 yield _strip(input_text, final_output_text)
 
@@ -348,10 +377,10 @@ def sample_expression_with_output(
     expression: "Expression",
     slot_lists: "Optional[Dict[str, SlotList]]" = None,
     expansion_rules: "Optional[Dict[str, Sentence]]" = None,
-    list_values: Optional[Dict[str, Any]] = None,
+    substitutions: Optional[Substitutions] = None,
     requires_context: Optional[Dict[str, Any]] = None,
     excludes_context: Optional[Dict[str, Any]] = None,
-) -> Iterable[Tuple[str, Optional[str], Dict[str, Any]]]:
+) -> Iterable[Tuple[str, Optional[str], Substitutions]]:
     """Sample possible text strings from an expression."""
     try:
         from hassil.errors import MissingListError, MissingRuleError
@@ -373,21 +402,21 @@ def sample_expression_with_output(
     except ImportError as exc:
         raise MissingLimitedDependencyError() from exc
 
-    if list_values is None:
-        list_values = {}
+    if substitutions is None:
+        substitutions = Substitutions()
 
     sample = partial(
         sample_expression_with_output,
         slot_lists=slot_lists,
         expansion_rules=expansion_rules,
-        list_values=list_values,
+        substitutions=substitutions,
         requires_context=requires_context,
         excludes_context=excludes_context,
     )
 
     if isinstance(expression, TextChunk):
         chunk: TextChunk = expression
-        yield (chunk.original_text, chunk.original_text, list_values)
+        yield (chunk.original_text, chunk.original_text, substitutions)
     elif isinstance(expression, Group):
         grp: Group = expression
         if isinstance(grp, Alternative):
@@ -396,7 +425,7 @@ def sample_expression_with_output(
                 yield from sample(item)
         elif isinstance(grp, (Sequence, Permutation)):
             # Each item is sampled, then the samples are combined.
-            # sampled_items = [(input_text, output_text, list_values), ...]
+            # sampled_items = [(input_text, output_text, substitutions), ...]
             is_permutation = isinstance(grp, Permutation)
             if is_permutation:
                 # Lists are needed because itertools makes multiple passes
@@ -409,10 +438,9 @@ def sample_expression_with_output(
 
             for ordering in orderings:
                 for sampled_items in itertools.product(*ordering):
-                    # Merge list values
-                    item_list_values = dict(list_values)
-                    for item in sampled_items:
-                        item_list_values.update(item[2])
+                    item_substitutions = substitutions.merged(
+                        *(item[2] for item in sampled_items)
+                    )
 
                     input_text = normalize_whitespace(
                         "".join(i[0] for i in sampled_items)
@@ -426,7 +454,7 @@ def sample_expression_with_output(
                         input_text = input_text.strip()
                         output_text = output_text.strip()
 
-                    yield (input_text, output_text, item_list_values)
+                    yield (input_text, output_text, item_substitutions)
         else:
             raise ValueError(f"Unexpected group type: {grp}")
     elif isinstance(expression, ListReference):
@@ -470,7 +498,7 @@ def sample_expression_with_output(
             for (
                 value_input_text,
                 value_output_text,
-                value_list_values,
+                value_substitutions,
             ) in sample(text_value.text_in):
                 if text_value.value_out is not None:
                     value_output_text = str(text_value.value_out)
@@ -478,7 +506,9 @@ def sample_expression_with_output(
                 yield (
                     value_input_text,
                     value_output_text,
-                    {**value_list_values, list_ref.list_name: value_output_text},
+                    value_substitutions.merged(
+                        Substitutions(lists={list_ref.list_name: value_output_text})
+                    ),
                 )
     elif isinstance(expression, RuleReference):
         # <rule>
@@ -486,7 +516,24 @@ def sample_expression_with_output(
         if (not expansion_rules) or (rule_ref.rule_name not in expansion_rules):
             raise MissingRuleError(f"Missing expansion rule <{rule_ref.rule_name}>")
 
-        yield from sample(expansion_rules[rule_ref.rule_name].expression)
+        for (
+            rule_input_text,
+            rule_output_text,
+            rule_substitutions,
+        ) in sample(expansion_rules[rule_ref.rule_name].expression):
+            # Record the complete text sampled for this rule, so <rule> can be
+            # used as a back reference in output text. Whitespace is kept as
+            # sampled, so a rule like "[the ]" still spaces itself correctly.
+            # Nested rules are recorded too: the inner reference is reached
+            # first, so both <light> and <room> are available in "the <room>
+            # light".
+            yield (
+                rule_input_text,
+                rule_output_text,
+                rule_substitutions.merged(
+                    Substitutions(rules={rule_ref.rule_name: rule_output_text or ""})
+                ),
+            )
     else:
         raise ValueError(f"Unexpected expression: {expression}")
 

@@ -224,6 +224,18 @@ expansion_rules:
 
 lets you say "turn on light" or "turn off my light" without having to repeat the optional part.
 
+Like lists, an expansion rule can be referenced from a sentence's `out` with `<name>`, and is replaced by whatever the rule actually matched:
+
+``` yaml
+sentences:
+  - in: dim <light>
+    out: set <light> brightness to 25
+expansion_rules:
+  light: "(livingroom light|kitchen light)"
+```
+
+lets you say "dim kitchen light" to send "set kitchen light brightness to 25". Nested rules work too — in `light: "the <room> light"`, both `<light>` and `<room>` are available in `out`.
+
 ## No Correct Patterns
 
 When you [correct sentences](#correct-sentences), you want to keep the score cutoff as low as possible to avoid letting invalid sentences though. But what if you just want *some* open-ended sentences, such as "draw me a picture of ..." which you can then forward to an image generator?
