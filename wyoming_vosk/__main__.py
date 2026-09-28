@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from vosk import KaldiRecognizer, Model, SetLogLevel
-from wyoming.asr import Transcribe, Transcript
+from wyoming.asr import (
+    Transcribe,
+    Transcript,
+    TranscriptChunk,
+    TranscriptStart,
+    TranscriptStop,
+)
 from wyoming.audio import AudioChunk, AudioChunkConverter, AudioStart, AudioStop
 from wyoming.event import Event
 from wyoming.info import AsrModel, AsrProgram, Attribution, Describe, Info
@@ -148,6 +154,12 @@ async def main() -> None:
         help="Return empty transcript when unknown words are spoken",
     )
     #
+    parser.add_argument(
+        "--no-streaming",
+        action="store_true",
+        help="Disable streaming of partial transcripts",
+    )
+    #
     parser.add_argument("--debug", action="store_true", help="Log DEBUG messages")
     parser.add_argument(
         "--log-format", default=logging.BASIC_FORMAT, help="Format for log messages"
@@ -215,6 +227,7 @@ async def main() -> None:
                     for language, model_names in MODELS.items()
                     for model_name in model_names
                 ],
+                supports_transcript_streaming=(not args.no_streaming),
             )
         ],
     )
@@ -261,6 +274,13 @@ class VoskEventHandler(AsyncEventHandler):
         self.language: Optional[str] = None
         self.model_name: Optional[str] = None
         self.recognizer: Optional[KaldiRecognizer] = None
+        self.streaming = not cli_args.no_streaming
+
+        # Text of the segments that vosk has already finalized
+        self.final_text = ""
+
+        # Text that has already been sent in transcript chunks
+        self.sent_text = ""
 
         _LOGGER.debug("Client connected: %s", self.client_id)
 
@@ -295,19 +315,38 @@ class VoskEventHandler(AsyncEventHandler):
                     "Loaded recognizer in %0.2f second(s)", end_time - start_time
                 )
 
+                if self.streaming:
+                    await self.write_event(
+                        TranscriptStart(language=self.language).event()
+                    )
+
             assert self.recognizer is not None
 
             # Process audio chunk
             chunk = AudioChunk.from_event(event)
             chunk = self.converter.convert(chunk)
-            self.recognizer.AcceptWaveform(bytes(chunk.audio))
+            if self.recognizer.AcceptWaveform(bytes(chunk.audio)):
+                # Silence was detected, so the text of this segment is final.
+                # Collecting it now (instead of letting it accumulate until
+                # FinalResult) is what lets it be streamed right away.
+                self._add_text(json.loads(self.recognizer.Result())["text"])
+                if self.streaming:
+                    await self._stream_text(self.final_text)
+            elif self.streaming:
+                await self._stream_text(self._get_stable_text())
 
         elif AudioStop.is_type(event.type):
             # Get transcript
             assert self.recognizer is not None
-            result = json.loads(self.recognizer.FinalResult())
-            text = result["text"]
+            self._add_text(json.loads(self.recognizer.FinalResult())["text"])
+            text = self.final_text
             _LOGGER.debug("Transcript for client %s: %s", self.client_id, text)
+
+            if self.streaming:
+                # Flush the rest of the uncorrected transcript. Chunks can only
+                # be appended, so corrections below are only reflected in the
+                # final transcript.
+                await self._stream_text(text)
 
             if self.cli_args.correct_sentences is not None:
                 original_text = text
@@ -317,6 +356,9 @@ class VoskEventHandler(AsyncEventHandler):
 
             await self.write_event(Transcript(text=text).event())
 
+            if self.streaming:
+                await self.write_event(TranscriptStop().event())
+
             return False
         else:
             _LOGGER.debug("Unexpected event: type=%s, data=%s", event.type, event.data)
@@ -325,6 +367,37 @@ class VoskEventHandler(AsyncEventHandler):
 
     async def disconnect(self) -> None:
         _LOGGER.debug("Client disconnected: %s", self.client_id)
+
+    def _add_text(self, text: str) -> None:
+        """Adds the text of a finalized segment to the transcript."""
+        text = text.strip()
+        if text:
+            self.final_text = f"{self.final_text} {text}".strip()
+
+    def _get_stable_text(self) -> str:
+        """Gets the transcript so far, minus the part vosk is still likely to change."""
+        assert self.recognizer is not None
+        partial_text = json.loads(self.recognizer.PartialResult()).get("partial", "")
+
+        # The last word of a partial result is the most likely to be revised,
+        # so hold it back until vosk has moved past it.
+        stable_words = partial_text.split()[:-1]
+        if not stable_words:
+            return self.final_text
+
+        return f"{self.final_text} {' '.join(stable_words)}".strip()
+
+    async def _stream_text(self, text: str) -> None:
+        """Sends the part of the transcript that hasn't been sent yet."""
+        if (text == self.sent_text) or (not text.startswith(self.sent_text)):
+            # Chunks can only be appended, so there is nothing to do when vosk
+            # revises text that was already sent. The final transcript will
+            # still be correct.
+            return
+
+        chunk_text = text[len(self.sent_text) :]
+        self.sent_text = text
+        await self.write_event(TranscriptChunk(text=chunk_text).event())
 
     def _load_recognizer(self, model: Model) -> KaldiRecognizer:
         """Loads Kaldi recognizer for the model, optionally limited by user-provided sentences."""

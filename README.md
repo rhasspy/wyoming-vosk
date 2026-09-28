@@ -263,6 +263,21 @@ With `--allow-unknown`, you can enable the detection of "unknown" words/phrases 
 
 **NOTE**: Some models do not support unknown words/phrases. See [supported languages](#supported-languages).
 
+## Streaming
+
+Partial transcripts are streamed to the client as they're recognized, using the
+Wyoming protocol's `transcript-chunk` events. Each chunk contains the text that
+vosk has recognized since the previous chunk, so joining them together gives you
+the transcript as it's being spoken.
+
+Streaming is on by default and can be turned off with `--no-streaming`.
+
+Some notes:
+
+* The last word of a partial result is held back until vosk moves past it, since it's the most likely to be revised.
+* Chunks can only be appended, so text is never streamed again if vosk revises a word that was already sent.
+* Chunks are **not** corrected using [sentence templates](#sentence-templates). Only the final `transcript` event is, so it may differ from the streamed text when using [corrected](#corrected) or [limited](#limited) mode.
+
 ## Supported Languages
 
 * Arabic (`ar`)

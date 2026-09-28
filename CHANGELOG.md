@@ -2,6 +2,7 @@
 
 ## 1.6.0
 
+- Stream partial transcripts with wyoming's `transcript-chunk` events (disable with `--no-streaming`)
 - Limited mode restricts vosk to whole sentences instead of individual words
 - Match transcripts to templates phonetically (Metaphone) instead of by spelling
 - `--correct-sentences` cutoff is now normalized by transcript length and defaults to 0.2
