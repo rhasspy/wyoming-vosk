@@ -1,4 +1,5 @@
 """Tests for wyoming-vosk"""
+
 import asyncio
 import sys
 import wave

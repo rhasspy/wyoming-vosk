@@ -134,8 +134,8 @@ async def main() -> None:
         "--correct-sentences",
         nargs="?",
         type=float,
-        const=0,
-        help="Enable sentence correction with optional score cutoff (0=strict, higher=less strict)",
+        const=0.2,
+        help="Enable sentence correction with optional score cutoff (0=never correct, higher=correct more)",
     )
     parser.add_argument(
         "--limit-sentences",
@@ -300,7 +300,7 @@ class VoskEventHandler(AsyncEventHandler):
             # Process audio chunk
             chunk = AudioChunk.from_event(event)
             chunk = self.converter.convert(chunk)
-            self.recognizer.AcceptWaveform(chunk.audio)
+            self.recognizer.AcceptWaveform(bytes(chunk.audio))
 
         elif AudioStop.is_type(event.type):
             # Get transcript
@@ -336,11 +336,11 @@ class VoskEventHandler(AsyncEventHandler):
                 self.cli_args.database_dir,
             )
             if (lang_config is not None) and lang_config.database_path.is_file():
-                words: List[str] = []
+                sentences: List[str] = []
                 with sqlite3.connect(str(lang_config.database_path)) as db_conn:
-                    cursor = db_conn.execute("SELECT word from WORDS")
+                    cursor = db_conn.execute("SELECT input_text from sentences")
                     for row in cursor:
-                        words.append(row[0])
+                        sentences.append(row[0])
 
                 casing_func_name = CASING_FOR_MODEL.get(
                     self.model_name,
@@ -349,18 +349,18 @@ class VoskEventHandler(AsyncEventHandler):
                     ),
                 )
                 _LOGGER.debug(
-                    "Limiting to %s possible word(s) with casing=%s",
-                    len(words),
+                    "Limiting to %s possible sentence(s) with casing=%s",
+                    len(sentences),
                     casing_func_name,
                 )
 
                 if self.cli_args.allow_unknown:
                     # Enable unknown words (will return empty transcript)
-                    words.append(UNK_FOR_MODEL.get(self.model_name, _DEFAULT_UNK))
+                    sentences.append(UNK_FOR_MODEL.get(self.model_name, _DEFAULT_UNK))
 
                 casing_func = _CASING[casing_func_name]
                 limited_str = json.dumps(
-                    [casing_func(w) for w in words], ensure_ascii=False
+                    [casing_func(s) for s in sentences], ensure_ascii=False
                 )
                 return KaldiRecognizer(model, 16000, limited_str)
 

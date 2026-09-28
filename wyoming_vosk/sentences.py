@@ -4,17 +4,25 @@ import logging
 import re
 import sqlite3
 import time
-from collections import abc
+from collections.abc import Sequence as ABCSequence
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
     from hassil.expression import Expression, Sentence
     from hassil.intents import SlotList
+    from unicode_rbnf import RbnfEngine
 
 _LOGGER = logging.getLogger()
+
+
+class MissingLimitedDependencyError(Exception):
+    """Raised when an optional dependency for limited sentences is missing."""
+
+    def __init__(self) -> None:
+        super().__init__("pip3 install wyoming-vosk[limited]")
 
 
 @dataclass
@@ -53,7 +61,7 @@ def load_sentences_for_language(
     try:
         import yaml
     except ImportError as exc:
-        raise Exception("pip3 install wyoming-vosk[limited]") from exc
+        raise MissingLimitedDependencyError() from exc
 
     # Load and verify YAML
     _LOGGER.debug("Loading %s", sentences_path)
@@ -94,28 +102,92 @@ def load_sentences_for_language(
     with db_conn:
         db_conn.execute(
             "CREATE TABLE sentences "
-            + "(id INTEGER PRIMARY KEY AUTOINCREMENT, input_text TEXT, output_text TEXT);"
-        )
-        db_conn.execute(
-            "CREATE TABLE words " + "(id INTEGER PRIMARY KEY AUTOINCREMENT, word TEXT);"
+            "(id INTEGER PRIMARY KEY AUTOINCREMENT, input_text TEXT, "
+            "output_text TEXT, input_sounds_like TEXT);"
         )
         db_conn.commit()
-        generate_sentences(sentences_yaml, db_conn)
+        generate_sentences_db(sentences_yaml, db_conn, get_number_engine(language))
 
     _CONFIG_CACHE[language] = config
 
     return config
 
 
-def generate_sentences(sentences_yaml: Dict[str, Any], db_conn: sqlite3.Connection):
+def get_number_engine(language: str) -> "Optional[RbnfEngine]":
+    """Get an engine for spelling out numbers, if the language is supported."""
     try:
-        import hassil.parse_expression
-        import hassil.sample
-        from hassil.intents import SlotList, TextChunk, TextSlotList, TextSlotValue
+        from unicode_rbnf import RbnfEngine
     except ImportError as exc:
-        raise Exception("pip3 install wyoming-vosk[limited]") from exc
+        raise MissingLimitedDependencyError() from exc
 
+    try:
+        return RbnfEngine.for_language(language)
+    except Exception:
+        _LOGGER.debug("No number engine for language: %s", language)
+        return None
+
+
+def generate_sentences_db(
+    sentences_yaml: Dict[str, Any],
+    db_conn: sqlite3.Connection,
+    number_engine: "Optional[RbnfEngine]" = None,
+) -> None:
+    """Write every possible sentence from the YAML templates into the database."""
     start_time = time.monotonic()
+
+    num_sentences = 0
+    for input_text, output_text in generate_sentences(sentences_yaml, number_engine):
+        if not input_text:
+            continue
+
+        db_conn.execute(
+            "INSERT INTO sentences (input_text, output_text, input_sounds_like) "
+            "VALUES (?, ?, ?)",
+            (input_text, output_text, sounds_like(input_text)),
+        )
+        num_sentences += 1
+
+    db_conn.commit()
+    end_time = time.monotonic()
+
+    _LOGGER.info(
+        "Generated %s sentence(s) in %0.2f second(s)",
+        num_sentences,
+        end_time - start_time,
+    )
+
+
+def sounds_like(text: str) -> str:
+    """Return a phonetic representation of text for fuzzy matching."""
+    try:
+        from pyphonetics import Metaphone
+    except ImportError as exc:
+        raise MissingLimitedDependencyError() from exc
+
+    phonetics_algorithm = Metaphone()
+    codes: List[str] = []
+    for word in text.split():
+        try:
+            codes.append(phonetics_algorithm.phonetics(word))
+        except Exception:
+            # Not all scripts can be encoded (Metaphone is Latin-only)
+            codes.append(word)
+
+    return "".join(codes)
+
+
+def generate_sentences(
+    sentences_yaml: Dict[str, Any], number_engine: "Optional[RbnfEngine]" = None
+) -> Iterable[Tuple[str, str]]:
+    """Generate (input text, output text) for every sentence in the YAML."""
+    try:
+        from hassil.expression import TextChunk
+        from hassil.intents import SlotList, TextSlotList, TextSlotValue
+        from hassil.parse_expression import parse_sentence
+        from hassil.sample import sample_expression
+        from hassil.util import is_template
+    except ImportError as exc:
+        raise MissingLimitedDependencyError() from exc
 
     # sentences:
     #   - same text in and out
@@ -136,52 +208,85 @@ def generate_sentences(sentences_yaml: Dict[str, Any], db_conn: sqlite3.Connecti
     # Load slot lists
     slot_lists: Dict[str, SlotList] = {}
     for slot_name, slot_info in sentences_yaml.get("lists", {}).items():
-        if isinstance(slot_info, abc.Sequence):
+        if isinstance(slot_info, ABCSequence):
             slot_info = {"values": slot_info}
+
+        slot_list_values: List[TextSlotValue] = []
+
+        slot_range = slot_info.get("range")
+        if slot_range:
+            assert (
+                number_engine is not None
+            ), "Can't expand ranges without a number engine"
+            slot_from = int(slot_range["from"])
+            slot_to = int(slot_range["to"])
+            slot_step = int(slot_range.get("step", 1))
+            for number in range(slot_from, slot_to + 1, slot_step):
+                # Use all available words for a number (all genders, cases, etc.)
+                format_result = number_engine.format_number(number)
+                number_strs = {
+                    s.replace("-", " ") for s in format_result.text_by_ruleset.values()
+                }
+                slot_list_values.extend(
+                    TextSlotValue(text_in=TextChunk(number_str), value_out=number)
+                    for number_str in number_strs
+                )
+
+            slot_lists[slot_name] = TextSlotList(
+                name=slot_name, values=slot_list_values
+            )
+            continue
 
         slot_values = slot_info.get("values")
         if not slot_values:
             _LOGGER.warning("No values for list %s, skipping", slot_name)
             continue
 
-        slot_list_values: List[TextSlotValue] = []
         for slot_value in slot_values:
             values_in: List[str] = []
+            values_out: List[str] = []
 
             if isinstance(slot_value, str):
-                values_in.append(slot_value)
-                value_out: str = slot_value
+                slot_value = {"in": slot_value}
+
+            # - in: text to say
+            #   out: text to output
+            value_in = str(slot_value["in"])
+            if not value_in:
+                # Skip slot value
+                continue
+
+            value_out = slot_value.get("out")
+            value_context = slot_value.get("context")
+
+            if is_template(value_in):
+                input_expression = parse_sentence(value_in).expression
+                for input_text in sample_expression(input_expression):
+                    values_in.append(input_text)
+                    values_out.append(value_out or input_text)
             else:
-                # - in: text to say
-                #   out: text to output
-                value_in = slot_value["in"]
-                value_out = slot_value["out"]
+                values_in.append(value_in)
+                values_out.append(value_out or value_in)
 
-                if hassil.intents.is_template(value_in):
-                    input_expression = hassil.parse_expression.parse_sentence(value_in)
-                    for input_text in hassil.sample.sample_expression(
-                        input_expression,
-                    ):
-                        values_in.append(input_text)
-                else:
-                    values_in.append(value_in)
-
-            for value_in in values_in:
+            for value_in, value_out in zip(values_in, values_out):
                 slot_list_values.append(
-                    TextSlotValue(TextChunk(value_in), value_out=value_out)
+                    TextSlotValue(
+                        TextChunk(value_in), value_out=value_out, context=value_context
+                    )
                 )
 
-        slot_lists[slot_name] = TextSlotList(slot_list_values)
+        slot_lists[slot_name] = TextSlotList(name=slot_name, values=slot_list_values)
 
     # Load expansion rules
-    expansion_rules: Dict[str, hassil.Sentence] = {}
+    expansion_rules: Dict[str, "Sentence"] = {}
     for rule_name, rule_text in sentences_yaml.get("expansion_rules", {}).items():
-        expansion_rules[rule_name] = hassil.parse_sentence(rule_text)
+        expansion_rules[rule_name] = parse_sentence(rule_text)
 
     # Generate possible sentences
-    num_sentences = 0
-    words: Set[str] = set()
     for template in templates:
+        requires_context: Optional[Dict[str, Any]] = None
+        excludes_context: Optional[Dict[str, Any]] = None
+
         if isinstance(template, str):
             input_templates: List[str] = [template]
             output_text: Optional[str] = None
@@ -195,101 +300,135 @@ def generate_sentences(sentences_yaml: Dict[str, Any], db_conn: sqlite3.Connecti
                 input_templates = input_str_or_list
 
             output_text = template.get("out")
+            requires_context = template.get("requires_context")
+            excludes_context = template.get("excludes_context")
 
         for input_template in input_templates:
-            if hassil.intents.is_template(input_template):
-                # Generate possible texts
-                input_expression = hassil.parse_expression.parse_sentence(
-                    input_template
-                )
-                for input_text, maybe_output_text in sample_expression_with_output(
-                    input_expression,
-                    slot_lists=slot_lists,
-                    expansion_rules=expansion_rules,
-                ):
-                    db_conn.execute(
-                        "INSERT INTO sentences (input_text, output_text) VALUES (?, ?)",
-                        (input_text, output_text or maybe_output_text or input_text),
-                    )
-                    words.update(w.strip() for w in input_text.split())
-                    num_sentences += 1
-            else:
+            if not is_template(input_template):
                 # Not a template
-                db_conn.execute(
-                    "INSERT INTO sentences (input_text, output_text) VALUES (?, ?)",
-                    (input_template, output_text or input_template),
+                # output_text may be empty on purpose
+                yield _strip(
+                    input_template,
+                    input_template if output_text is None else output_text,
                 )
-                words.update(w.strip() for w in input_template.split())
-                num_sentences += 1
+                continue
 
-        db_conn.commit()
+            # Generate possible texts
+            input_expression = parse_sentence(input_template).expression
+            for (
+                input_text,
+                maybe_output_text,
+                list_values,
+            ) in sample_expression_with_output(
+                input_expression,
+                slot_lists=slot_lists,
+                expansion_rules=expansion_rules,
+                requires_context=requires_context,
+                excludes_context=excludes_context,
+            ):
+                if output_text is None:
+                    final_output_text = maybe_output_text or input_text
+                else:
+                    # May be empty
+                    final_output_text = output_text
 
-    # Add words
-    for word in words:
-        db_conn.execute(
-            "INSERT INTO words (word) VALUES (?)",
-            (word,),
-        )
+                if list_values:
+                    # Replace {lists} with values
+                    final_output_text = final_output_text.format(**list_values)
 
-    db_conn.commit()
-    end_time = time.monotonic()
+                yield _strip(input_text, final_output_text)
 
-    _LOGGER.info(
-        "Generated %s sentence(s) with %s unique word(s) in %0.2f second(s)",
-        num_sentences,
-        len(words),
-        end_time - start_time,
-    )
+
+def _strip(input_text: str, output_text: str) -> Tuple[str, str]:
+    """Remove whitespace left over from optional template parts."""
+    return (input_text.strip(), output_text.strip())
 
 
 def sample_expression_with_output(
     expression: "Expression",
     slot_lists: "Optional[Dict[str, SlotList]]" = None,
     expansion_rules: "Optional[Dict[str, Sentence]]" = None,
-) -> Iterable[Tuple[str, Optional[str]]]:
+    list_values: Optional[Dict[str, Any]] = None,
+    requires_context: Optional[Dict[str, Any]] = None,
+    excludes_context: Optional[Dict[str, Any]] = None,
+) -> Iterable[Tuple[str, Optional[str], Dict[str, Any]]]:
     """Sample possible text strings from an expression."""
-    from hassil.expression import (
-        ListReference,
-        RuleReference,
-        Sequence,
-        SequenceType,
-        TextChunk,
+    try:
+        from hassil.errors import MissingListError, MissingRuleError
+        from hassil.expression import (
+            Alternative,
+            Group,
+            ListReference,
+            Permutation,
+            RuleReference,
+            Sequence,
+            TextChunk,
+        )
+        from hassil.intents import TextSlotList
+        from hassil.util import (
+            check_excluded_context,
+            check_required_context,
+            normalize_whitespace,
+        )
+    except ImportError as exc:
+        raise MissingLimitedDependencyError() from exc
+
+    if list_values is None:
+        list_values = {}
+
+    sample = partial(
+        sample_expression_with_output,
+        slot_lists=slot_lists,
+        expansion_rules=expansion_rules,
+        list_values=list_values,
+        requires_context=requires_context,
+        excludes_context=excludes_context,
     )
-    from hassil.intents import TextSlotList
-    from hassil.recognize import MissingListError, MissingRuleError
-    from hassil.util import normalize_whitespace
 
     if isinstance(expression, TextChunk):
         chunk: TextChunk = expression
-        yield (chunk.original_text, chunk.original_text)
-    elif isinstance(expression, Sequence):
-        seq: Sequence = expression
-        if seq.type == SequenceType.ALTERNATIVE:
-            for item in seq.items:
-                yield from sample_expression_with_output(
-                    item,
-                    slot_lists,
-                    expansion_rules,
+        yield (chunk.original_text, chunk.original_text, list_values)
+    elif isinstance(expression, Group):
+        grp: Group = expression
+        if isinstance(grp, Alternative):
+            # Only one item is used
+            for item in grp.items:
+                yield from sample(item)
+        elif isinstance(grp, (Sequence, Permutation)):
+            # Each item is sampled, then the samples are combined.
+            # sampled_items = [(input_text, output_text, list_values), ...]
+            is_permutation = isinstance(grp, Permutation)
+            if is_permutation:
+                # Lists are needed because itertools makes multiple passes
+                item_samples = [list(sample(item)) for item in grp.items]
+                orderings: Iterable[Iterable[Any]] = itertools.permutations(
+                    item_samples
                 )
-        elif seq.type == SequenceType.GROUP:
-            seq_sentences = map(
-                partial(
-                    sample_expression_with_output,
-                    slot_lists=slot_lists,
-                    expansion_rules=expansion_rules,
-                ),
-                seq.items,
-            )
-            sentence_texts = itertools.product(*seq_sentences)
-            for sentence_words in sentence_texts:
-                yield (
-                    normalize_whitespace("".join(w[0] for w in sentence_words)),
-                    normalize_whitespace(
-                        "".join(w[1] for w in sentence_words if w[1] is not None)
-                    ),
-                )
+            else:
+                orderings = [map(sample, grp.items)]
+
+            for ordering in orderings:
+                for sampled_items in itertools.product(*ordering):
+                    # Merge list values
+                    item_list_values = dict(list_values)
+                    for item in sampled_items:
+                        item_list_values.update(item[2])
+
+                    input_text = normalize_whitespace(
+                        "".join(i[0] for i in sampled_items)
+                    )
+                    output_text = normalize_whitespace(
+                        "".join(str(i[1]) for i in sampled_items if i[1] is not None)
+                    )
+
+                    if is_permutation:
+                        # Strip whitespace added between permuted items
+                        input_text = input_text.strip()
+                        output_text = output_text.strip()
+
+                    yield (input_text, output_text, item_list_values)
         else:
-            raise ValueError(f"Unexpected sequence type: {seq}")
+            raise ValueError(f"Unexpected group type: {grp}")
     elif isinstance(expression, ListReference):
         # {list}
         list_ref: ListReference = expression
@@ -297,62 +436,72 @@ def sample_expression_with_output(
             raise MissingListError(f"Missing slot list {{{list_ref.list_name}}}")
 
         slot_list = slot_lists[list_ref.list_name]
-        if isinstance(slot_list, TextSlotList):
-            text_list: TextSlotList = slot_list
-
-            if not text_list.values:
-                # Not necessarily an error, but may be a surprise
-                _LOGGER.warning("No values for list: %s", list_ref.list_name)
-
-            for text_value in text_list.values:
-                if text_value.value_out:
-                    is_first_text = True
-                    for input_text, output_text in sample_expression_with_output(
-                        text_value.text_in,
-                        slot_lists,
-                        expansion_rules,
-                    ):
-                        if is_first_text:
-                            output_text = (
-                                str(text_value.value_out)
-                                if text_value.value_out is not None
-                                else ""
-                            )
-                            is_first_text = False
-                        else:
-                            output_text = None
-
-                        yield (input_text, output_text)
-                else:
-                    yield from sample_expression_with_output(
-                        text_value.text_in,
-                        slot_lists,
-                        expansion_rules,
-                    )
-        else:
+        if not isinstance(slot_list, TextSlotList):
+            # Range lists are expanded into words earlier.
+            # Wildcards are not supported.
             raise ValueError(f"Unexpected slot list type: {slot_list}")
+
+        text_list: TextSlotList = slot_list
+
+        if requires_context or excludes_context:
+            # Filtered values
+            filtered_values = [
+                v
+                for v in text_list.values
+                if (
+                    (not requires_context)
+                    or check_required_context(
+                        requires_context, v.context, allow_missing_keys=True
+                    )
+                )
+                and (
+                    (not excludes_context)
+                    or check_excluded_context(excludes_context, v.context)
+                )
+            ]
+        else:
+            filtered_values = text_list.values
+
+        if not filtered_values:
+            # Not necessarily an error, but may be a surprise
+            _LOGGER.warning("No values for list: %s", list_ref.list_name)
+
+        for text_value in filtered_values:
+            for (
+                value_input_text,
+                value_output_text,
+                value_list_values,
+            ) in sample(text_value.text_in):
+                if text_value.value_out is not None:
+                    value_output_text = str(text_value.value_out)
+
+                yield (
+                    value_input_text,
+                    value_output_text,
+                    {**value_list_values, list_ref.list_name: value_output_text},
+                )
     elif isinstance(expression, RuleReference):
         # <rule>
         rule_ref: RuleReference = expression
         if (not expansion_rules) or (rule_ref.rule_name not in expansion_rules):
             raise MissingRuleError(f"Missing expansion rule <{rule_ref.rule_name}>")
 
-        rule_body = expansion_rules[rule_ref.rule_name]
-        yield from sample_expression_with_output(
-            rule_body,
-            slot_lists,
-            expansion_rules,
-        )
+        yield from sample(expansion_rules[rule_ref.rule_name].expression)
     else:
         raise ValueError(f"Unexpected expression: {expression}")
 
 
 def correct_sentence(
-    text: str, config: LanguageConfig, score_cutoff: float = 0.0
+    text: str, config: LanguageConfig, score_cutoff: float = 0.2
 ) -> str:
     """Correct a sentence using rapidfuzz."""
     if not config.database_path.is_file():
         # Can't correct without a database
+        return text
+
+    text = text.strip()
+    if not text:
+        # Can't correct empty text
         return text
 
     # Don't correct transcripts that match a "no correct" pattern
@@ -360,16 +509,18 @@ def correct_sentence(
         if pattern.match(text):
             return text
 
+    text_sounds_like = sounds_like(text)
+
     with sqlite3.connect(str(config.database_path)) as db_conn:
         try:
             from rapidfuzz.distance import Levenshtein
             from rapidfuzz.process import extractOne
         except ImportError as exc:
-            raise Exception("pip3 install wyoming-vosk[limited]") from exc
+            raise MissingLimitedDependencyError() from exc
 
-        cursor = db_conn.execute("SELECT input_text, output_text from sentences")
+        cursor = db_conn.execute("SELECT input_sounds_like, output_text from sentences")
         result = extractOne(
-            [text],  # critical that this is a list
+            [text_sounds_like],  # critical that this is a list
             cursor,
             processor=lambda s: s[0],
             scorer=Levenshtein.distance,
@@ -377,13 +528,21 @@ def correct_sentence(
         )
         fixed_row, score = result[0], result[1]
 
+        # Normalize by transcript length so the cutoff does not depend on how
+        # long the sentence is.
+        norm_score = score / len(text)
+
         final_text = text
-        if (score_cutoff <= 0) or (score <= score_cutoff):
+        if norm_score < score_cutoff:
             # Map to output text
             final_text = fixed_row[1]
 
         _LOGGER.debug(
-            "score=%s/%s, original=%s, final=%s", score, score_cutoff, text, final_text
+            "score=%s/%s, original=%s, final=%s",
+            norm_score,
+            score_cutoff,
+            text,
+            final_text,
         )
 
         return final_text

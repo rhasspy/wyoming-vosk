@@ -40,12 +40,15 @@ Then, run `wyoming_vosk` like:
 script/run ... --sentences-dir <SENTENCES_DIR> --correct-sentences <CUTOFF>
 ```
 
-where `<CUTOFF>` is:
+Transcripts are matched against the templates by how they *sound* rather than how they are spelled: both are run through the [Metaphone](https://en.wikipedia.org/wiki/Metaphone) algorithm, and the closest template is found with a [weighted Levenshtein distance](https://rapidfuzz.github.io/RapidFuzz/Usage/distance/Levenshtein.html) (`weights=(1, 1, 3)`). The distance is divided by the length of the transcript, so `<CUTOFF>` means the same thing for short and long sentences.
 
-* empty or 0 - force transcript to be one of the template sentences
-* greater than 0 - allow more sentences that are not similar to templates to pass through
+A transcript is replaced by the closest template only when its score is **below** `<CUTOFF>`, so:
 
-When `<CUTOFF>` is large, speech recognition is effectively open-ended again. Experiment with different values to find one that lets you speak sentences outside your templates without sacrificing accuracy too much. See description the `score_cutoff` parameter in [the rapidfuzz docs](https://rapidfuzz.github.io/RapidFuzz/Usage/distance/Levenshtein.html) for more details (`weights=(1, 1, 3)`).
+* 0 - never correct anything (transcripts pass through unchanged)
+* small, such as the default 0.2 - only correct transcripts that already sound close to a template
+* large - force nearly every transcript to become one of the template sentences
+
+Experiment with different values to find one that lets you speak sentences outside your templates without sacrificing accuracy too much.
 
 If you have a set of sentences with a specific pattern that you'd like to skip correction, add them to your [no-correct patterns](#no-correct-patterns).
 
@@ -147,6 +150,63 @@ lists:
 ```
 
 lets you say "turn on tv" to turn on the living room TV, and "turn off light" to turn off the bedroom light.
+
+A list value's `out` can also be referenced from a sentence's `out` with `{list_name}`:
+
+``` yaml
+sentences:
+  - in: turn on {device}
+    out: "TURN_ON:{device}"
+lists:
+  device:
+    values:
+      - in: tv
+        out: living room tv
+```
+
+lets you say "turn on tv" to send "TURN_ON:living room tv".
+
+#### Number Ranges
+
+Instead of `values`, a list may have a `range` which is expanded into the words for each number in the language of the sentences file:
+
+``` yaml
+sentences:
+  - set brightness to {brightness}[ percent]
+lists:
+  brightness:
+    range:
+      from: 10
+      to: 100
+      step: 10
+```
+
+lets you say "set brightness to fifty percent" and get "set brightness to 50 percent" in the transcript. Ranges are only available for [languages supported by unicode-rbnf](https://github.com/rhasspy/unicode-rbnf).
+
+#### Context
+
+List values may carry a `context`, which sentences can then filter on with `requires_context` and `excludes_context`:
+
+``` yaml
+sentences:
+  - in: turn on {name}
+    requires_context:
+      domain: light
+  - in: play {name}
+    excludes_context:
+      domain: light
+lists:
+  name:
+    values:
+      - in: kitchen light
+        context:
+          domain: light
+      - in: living room speaker
+        context:
+          domain: media_player
+```
+
+lets you say "turn on kitchen light" and "play living room speaker", but not "turn on living room speaker".
 
 ### Expansion Rules
 
